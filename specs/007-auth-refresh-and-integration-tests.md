@@ -1,6 +1,6 @@
 # 007 — Authentication verification and integration test harness
 
-**Brief:** 1.2 "Authentication (JWT or similar)"; "One persistence layer (PostgreSQL…)".
+**Requirement:** 1.2 "Authentication (JWT or similar)"; "One persistence layer (PostgreSQL…)".
 
 ## Current state (verified by reading the code, then by tests)
 The base already implements the design this spec first assumed it would have to build: refresh tokens stored as SHA-256 hashes, atomic rotation in a transaction, reuse detection that revokes all sessions, bcrypt (cost 12), uniform login errors, zod validation, short-lived access tokens (15 min) signed with a different secret from refresh tokens. What it lacked was proof. Nothing exercised the HTTP layer against a real database, and the tests found defects that unit tests and code review had missed.

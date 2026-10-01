@@ -1,6 +1,6 @@
 # 006 — Cost control and rate limits
 
-**Brief:** 1.2 "Explain: how you'd control costs and rate limits in production".
+**Requirement:** 1.2 "Explain: how you'd control costs and rate limits in production".
 
 ## Current state before this spec (verified)
 - Limiters used `express-rate-limit` with in-memory counters, per process, and were skipped when `NODE_ENV=test`, so they were never exercised.
@@ -14,7 +14,7 @@
 - **Hard per-request bounds** before any model call (question length after normalisation, chunk count, max output tokens).
 - **Answer cache** in Redis (`ai/responseCache.ts`): keyed by user, question, retrieved chunk ids, prompt version and model; first turn only; short TTL; Redis failure means a miss.
 - **Pricing as configuration** (`ai/pricing.ts`, `MODEL_PRICING_JSON`); an unknown model uses a conservative fallback and warns once, never zero.
-- `docs/SECURITY.md` answers the brief (layers, how the budget works, what belongs in AWS).
+- `docs/SECURITY.md` covers the requirements (layers, how the budget works, what belongs in AWS).
 
 ## Defects found on the way
 1. **Every error path of the chat and extraction routes hung.** Those handlers are `async` and `throw`, Express 4 does not forward the rejection, and no wrapper existed, so a 400, 404, 429 or 502 never reached the client (the request waited until the client gave up, and the error was logged as an unhandled rejection). This would have made every limit in this spec invisible to the user. Fixed with `express-async-errors`; `errors.test.ts` covers the paths.

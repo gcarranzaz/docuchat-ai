@@ -1,6 +1,6 @@
 # 003 — Prompt registry, clean separation, and input safety
 
-**Brief:** 1.2 "Clear separation between prompt construction, model invocation, response post-processing"; "Basic prompt versioning or configuration"; "Explain: how you prevent prompt injection or unsafe input".
+**Requirement:** 1.2 "Clear separation between prompt construction, model invocation, response post-processing"; "Basic prompt versioning or configuration"; "Explain: how you prevent prompt injection or unsafe input".
 
 ## Current state (verified)
 - Prompts live in `ai/prompts/promptBuilder.ts` with v1 (text) and v2 (JSON) templates. `promptVersion` is saved per assistant message.

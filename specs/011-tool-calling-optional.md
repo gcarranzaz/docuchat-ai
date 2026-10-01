@@ -1,6 +1,6 @@
-# 011 — Tool/function calling (OPTIONAL bonus, do last)
+# 011 — Tool/function calling (OPTIONAL extra, do last)
 
-**Brief:** Bonus "Tool/function calling with the LLM" (optional, pick any). Start only after every MUST spec is done. If time runs out, record the decision in the README instead.
+**Requirement:** Extra: tool/function calling with the LLM (optional). Start only after every CORE spec is done. If it does not fit, record the decision in the README instead.
 
 ## Scope (minimal)
 - One read-only tool exposed to the model through `LlmProvider`: `get_document_info({ documentId })` → title, size, chunk count, created date, summary. No writes, no network, no access to other users.

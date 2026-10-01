@@ -3,7 +3,7 @@
 **Status:** accepted
 
 ## Context
-Model output is untrusted input. It can break the requested format, cite sources that were never provided, or sound sure about nothing. The brief asks how hallucinations and uncertainty are handled.
+Model output is untrusted input. It can break the requested format, cite sources that were never provided, or sound sure about nothing. The requirements ask how hallucinations and uncertainty are handled.
 
 ## Decision
 - The model must return JSON. It is parsed and validated against a schema; invalid output gets one repair attempt, then a typed error (HTTP 502). Raw model text is never shown to the user.

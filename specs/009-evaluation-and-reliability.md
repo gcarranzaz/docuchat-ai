@@ -1,9 +1,9 @@
 # 009 — Evaluation and reliability
 
-**Brief:** 2.2 "You don't need to build a full evaluation system, but explain how you would measure output quality, detect regressions after prompt/model changes, and handle 'AI gives wrong answer' in production. This can be a short markdown section."
+**Requirement:** 2.2 A full evaluation system is not required, but the approach must be explained: how output quality is measured, how regressions are detected after prompt/model changes, and how a wrong AI answer is handled in production. This can be a short markdown section.
 
 ## Scope (kept deliberately small)
-The brief asks for an explanation. It is in `docs/EVALUATION.md`, and backed by a small runnable system so the explanation is not just words: a golden set, a runner, a baseline comparison, a CI gate.
+The requirements ask for an explanation. It is in `docs/EVALUATION.md`, and backed by a small runnable system so the explanation is not just words: a golden set, a runner, a baseline comparison, a CI gate.
 
 ## Result
 - **Golden set** (`backend/evals/golden.json`, 14 cases): six answerable (single fact, second passage, multi-passage synthesis, relevant passage among noise, non-English document, follow-up that needs history), two unanswerable (missing topic, near miss), four injection (inside a document, forged delimiter, in the question, role override) and two extractions (invoice, résumé).

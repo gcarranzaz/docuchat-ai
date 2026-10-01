@@ -15,4 +15,4 @@ Non-negotiable principles for this codebase. Every spec in `specs/` must respect
 ## Working agreement (SDD)
 - One spec per gap (`specs/NNN-*.md`) with verifiable acceptance criteria.
 - Conventional commits, one commit (or small group) per spec.
-- `docs/COMPLIANCE.md` maps every line of the assessment brief to its evidence.
+- `docs/REQUIREMENTS.md` maps every requirement to its evidence.

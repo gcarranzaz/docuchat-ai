@@ -2,7 +2,7 @@
  * Chat pipeline
  * =============
  * The three stages of an AI answer, kept separate so each can be tested and
- * changed on its own (assessment 1.2):
+ * changed on its own (requirement 1.2):
  *
  *   1. Prompt construction   ai/prompts/promptBuilder.ts   pure
  *   2. Model invocation      ai/providers/*                retries and fallback live here

@@ -1,6 +1,6 @@
 # Security: prompt injection and unsafe input
 
-This answers two assessment questions: how prompt injection and unsafe input are handled (first half), and how costs and rate limits are controlled in production (second half, "Cost control and rate limits").
+This answers two questions: how prompt injection and unsafe input are handled (first half), and how costs and rate limits are controlled in production (second half, "Cost control and rate limits").
 
 ## Threat model
 

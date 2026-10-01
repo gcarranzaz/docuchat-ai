@@ -1,6 +1,6 @@
 # 005 — Re-ask, feedback, and handling uncertainty
 
-**Brief:** 1.3 "Allow user to refine or re-ask a question", "Handle hallucinations or uncertainty gracefully".
+**Requirement:** 1.3 "Allow user to refine or re-ask a question", "Handle hallucinations or uncertainty gracefully".
 
 ## Current state before this spec (verified)
 - Each answer had a confidence score and level. When retrieval found nothing the backend answered "No relevant information found" without calling the model. There was no way to re-ask or give feedback, and no user-facing handling of low confidence.

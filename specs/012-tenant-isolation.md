@@ -1,6 +1,6 @@
 # 012 — Multi-tenant data isolation
 
-**Brief:** Bonus "Multi-tenant prompt or data isolation".
+**Requirement:** Extra "Multi-tenant prompt or data isolation".
 
 ## Threat
 One user reading, changing or deleting another user's documents, conversations, extractions or feedback; or the AI being shown one user's text while answering another (prompt isolation). The usual causes are a missing `WHERE user_id = ...`, an identifier taken from the request instead of the token, or a shared cache.

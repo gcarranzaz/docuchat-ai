@@ -1,6 +1,6 @@
 # Evaluation and reliability
 
-This answers brief 2.2: how output quality is measured, how regressions are detected after a prompt or model change, and what happens when the AI gives a wrong answer in production. A small version of each is implemented and runnable; the rest is described as the next step.
+This covers requirement 2.2: how output quality is measured, how regressions are detected after a prompt or model change, and what happens when the AI gives a wrong answer in production. A small version of each is implemented and runnable; the rest is described as the next step.
 
 ## Run it
 

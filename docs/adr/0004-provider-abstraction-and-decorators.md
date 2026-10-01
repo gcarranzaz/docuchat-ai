@@ -3,7 +3,7 @@
 **Status:** accepted
 
 ## Context
-The brief asks that the model provider can be changed. Providers differ in request format, streaming format, error shape and what they support (Anthropic has no embeddings API). We also need retries, a fallback, and optional PII masking, without scattering those across call sites.
+The requirements ask that the model provider can be changed. Providers differ in request format, streaming format, error shape and what they support (Anthropic has no embeddings API). We also need retries, a fallback, and optional PII masking, without scattering those across call sites.
 
 ## Decision
 - A small `LlmProvider` interface: `embed`, `embedBatch`, `complete`, `stream`, `isConfigured`.
@@ -18,4 +18,4 @@ The brief asks that the model provider can be changed. Providers differ in reque
 - Writing the Anthropic client by hand costs maintenance (streaming parser) but keeps the dependency list short and the behaviour visible; it was verified against the live API (`npm run smoke:anthropic`). The OpenAI path was not exercised live for this exercise.
 
 ## Alternatives considered
-LangChain or the Vercel AI SDK would give many providers quickly, but hide retry, streaming and error behaviour that this assessment is explicitly about, and add a large dependency surface.
+LangChain or the Vercel AI SDK would give many providers quickly, but hide retry, streaming and error behaviour that this project is explicitly about, and add a large dependency surface.

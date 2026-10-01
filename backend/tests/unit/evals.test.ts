@@ -19,7 +19,7 @@ function answering(reply: (userPrompt: string) => string): LlmProvider {
 const structured = (answer: string, citations: number[] = [0], confidence = 'HIGH') => JSON.stringify({ answer, citations, confidence, reasoning: 'x' });
 
 describe('the golden set', () => {
-  it('has every kind of case the assessment asks about, with unique ids', () => {
+  it('has every kind of case the product requires, with unique ids', () => {
     const kinds = new Set(golden.chat.map((c) => c.kind));
     expect(kinds).toEqual(new Set(['answerable', 'unanswerable', 'injection']));
     expect(golden.extraction.length).toBeGreaterThanOrEqual(1);

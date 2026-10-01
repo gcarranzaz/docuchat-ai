@@ -1,6 +1,6 @@
 # 008 — Data handling: what we store, retention, PII, logging, audit
 
-**Brief:** 2.1 "What data you store vs what you don't", "How long AI inputs/outputs are retained", "How you would handle PII, Logging, Auditability". Bonus: vector store and RAG.
+**Requirement:** 2.1 "What data you store vs what you don't", "How long AI inputs/outputs are retained", "How you would handle PII, Logging, Auditability". Extra: vector store and RAG.
 
 ## Current state before this spec (verified)
 - Stored: users, documents (full text), chunks with embeddings (pgvector), conversations with citations and confidence, extractions, usage records.

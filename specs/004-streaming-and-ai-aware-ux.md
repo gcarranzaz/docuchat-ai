@@ -1,6 +1,6 @@
 # 004 — Streaming responses and AI-aware UX
 
-**Brief:** 1.3 "At least 2 pages", "A form to submit data", "Display AI responses in a user-friendly way", "Loading, error, and empty states", "Show model status (thinking, partial results, errors)"; Bonus "Streaming AI responses (token-by-token UX)".
+**Requirement:** 1.3 "At least 2 pages", "A form to submit data", "Display AI responses in a user-friendly way", "Loading, error, and empty states", "Show model status (thinking, partial results, errors)"; Extra "Streaming AI responses (token-by-token UX)".
 
 ## Current state before this spec (verified)
 - Pages: Login, Chat, History. `ChatPage` duplicated all the logic of `useChat.ts`, which nothing used. One blocking request; no status, no partial output.

@@ -51,7 +51,7 @@ sequenceDiagram
 
 What the client sees while streaming is a **draft**. The final `result` event carries the validated answer, citations, confidence and the `grounded` flag, and the UI replaces the draft with it.
 
-## The three AI stages are separate (brief 1.2)
+## The three AI stages are separate (requirement 1.2)
 
 | Stage | Where | Property |
 |---|---|---|

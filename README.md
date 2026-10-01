@@ -4,13 +4,13 @@ Upload documents, ask questions, get answers that cite the passages they come fr
 
 **Stack:** TypeScript, Node 20, Express, PostgreSQL 16 with pgvector, Redis and BullMQ, React 18 with Vite and Tailwind, Docker, Terraform (AWS).
 
-This repository is my submission for the *Full Stack AI Engineer* assessment. The brief rewards judgment over completeness, so this README says what I chose, what I left out and what I would do next. Every claim here has a pointer to code, a test or a document; the table at the end maps the brief to evidence, including the parts that are only partly done.
+This README says what I chose, what I left out and what I would do next. Every claim here has a pointer to code, a test or a document; the table at the end maps the requirements to evidence, including the parts that are only partly done.
 
 ## Where this comes from (read this first)
 
-The project **starts from an earlier personal prototype of mine**, [`fullstack-ai-rag-docuchat`](https://github.com/gcarranzaz/fullstack-ai-rag-docuchat). I used it as the base on purpose, so the time went into production concerns instead of scaffolding. What existed and what I added for this assessment:
+The project **starts from an earlier personal prototype of mine**, [`fullstack-ai-rag-docuchat`](https://github.com/gcarranzaz/fullstack-ai-rag-docuchat). I used it as the base on purpose, so the time went into production concerns instead of scaffolding. What existed and what I added in this iteration:
 
-| Already in the prototype | Added or fixed for this assessment |
+| Already in the prototype | Added or fixed in this iteration |
 |---|---|
 | Upload (text, PDF), chunking, pgvector HNSW search, BullMQ embedding worker | Tests: unit, integration (real Postgres and Redis) and a CI pipeline. The prototype had none |
 | JWT auth with refresh-token rotation and reuse detection | Verified by tests; a crash in reuse detection fixed |
@@ -85,7 +85,7 @@ API examples for the VS Code REST Client are in [docs/api-examples.http](docs/ap
 - A tenant is a user. No organizations, roles or sharing.
 - Text and PDF only; no OCR, no scanned documents, no images.
 - One region, one database instance, no CDN or WAF.
-- bcrypt stays (no argon2 migration), Express stays, REST stays. Nothing in the brief needed them changed.
+- bcrypt stays (no argon2 migration), Express stays, REST stays. Nothing in the requirements needed them changed.
 
 ## Architecture decisions
 
@@ -108,7 +108,7 @@ Worker (BullMQ) ──► chunk, embed, store     │     retention job (daily)
 
 ## AI design choices
 
-**Prompt, invocation and post-processing are separate** (brief 1.2). Prompt construction (`ai/prompts/`) is a pure function over versioned, immutable templates. Invocation (`ai/providers/`) is behind one interface, with retry, fallback and PII masking as wrappers. Post-processing (`ai/postprocessing/`) is pure and schema-validated. `ai/pipeline/chatPipeline.ts` only wires them; the eval runner and the tests use it directly.
+**Prompt, invocation and post-processing are separate** (requirement 1.2). Prompt construction (`ai/prompts/`) is a pure function over versioned, immutable templates. Invocation (`ai/providers/`) is behind one interface, with retry, fallback and PII masking as wrappers. Post-processing (`ai/postprocessing/`) is pure and schema-validated. `ai/pipeline/chatPipeline.ts` only wires them; the eval runner and the tests use it directly.
 
 - **Switching providers:** `AI_PROVIDER` and `AI_FALLBACK_PROVIDER`. Completions fall back after retries on 429, 5xx and timeouts; embeddings never fall back (vectors from different models cannot share an index). After the first streamed token there is no retry or fallback.
 - **Prompt versioning:** `PROMPT_VERSION_CHAT` and `PROMPT_VERSION_EXTRACT` pick a version from the registry; an unknown version fails at startup. Every stored answer records its `prompt_version` and `model`, so a bad answer can be traced. A released template is never edited, only superseded.
@@ -118,7 +118,7 @@ Worker (BullMQ) ──► chunk, embed, store     │     retention job (daily)
 - **Streaming:** answers stream over Server-Sent Events. What streams is a draft; the final `result` event carries the validated answer and the UI replaces the draft. Closing the page aborts the provider call and charges an estimate for what was generated.
 - **Tool calling (optional, off by default):** `TOOLS_ENABLED=true` lets the model call one **read-only** tool, `get_document_info`. The user id comes from the server and never from the model's arguments, arguments are validated, the loop is bounded to two rounds, every call is audited, and a foreign document is indistinguishable from a missing one. Tools with side effects are excluded on purpose: a steered model should only be able to write a wrong sentence, not take an action. It is not offered on the streaming endpoint. Details: [docs/SECURITY.md](docs/SECURITY.md).
 
-## What the interface does about AI uncertainty (brief 1.3)
+## What the interface does about AI uncertainty (requirement 1.3)
 
 Streaming shows the model's status (searching your documents, then writing the answer, with a Stop button) and marks the text as a draft. When the final answer arrives: citations open to show the source passage; a LOW or NONE confidence shows a warning; an answer without valid citations is flagged as not grounded; a stopped answer says it was not verified. **Regenerate** asks again, thumbs up and down are stored with the prompt version and model (down-votes go to a review queue that grows the golden set, a manual step), and conversation history is sent as context for follow-ups.
 
@@ -155,11 +155,11 @@ Terraform for AWS (ECS Fargate, RDS with pgvector, ElastiCache, ALB, Secrets Man
 
 ## How the work was organized
 
-The work followed spec-driven development: [docs/constitution.md](docs/constitution.md) holds the principles, [specs/](specs/) holds one spec per concern (each cites the line of the brief it answers, the verified starting state, and checkable criteria) and [AGENTS.md](AGENTS.md) the rules for AI-assisted sessions. I used an AI coding assistant throughout, with the specs as the contract, and I list its limits where they matter. [docs/COMPLIANCE.md](docs/COMPLIANCE.md) is the live checklist.
+The work followed spec-driven development: [docs/constitution.md](docs/constitution.md) holds the principles, [specs/](specs/) holds one spec per concern (each cites the requirement it covers, the verified starting state, and checkable criteria) and [AGENTS.md](AGENTS.md) the rules for AI-assisted sessions. I used an AI coding assistant throughout, with the specs as the contract, and I list its limits where they matter. [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) is the live checklist.
 
-## Brief to evidence
+## Requirements coverage
 
-| Brief | Where |
+| Req | Where |
 |---|---|
 | 1.1 Submit content, chat with AI, structured output | Documents, chat and extractions routes; React app |
 | 1.2 REST API, AI endpoint, PostgreSQL, JWT | `backend/src/routes`, `backend/migrations`, auth tests |
@@ -171,13 +171,13 @@ The work followed spec-driven development: [docs/constitution.md](docs/constitut
 | 2.2 Quality, regressions, wrong answers | [EVALUATION.md](docs/EVALUATION.md) |
 | 3.1 Terraform, secrets, config vs code, rotation, bursts | [infra/terraform](infra/terraform), [DEPLOYMENT.md](docs/DEPLOYMENT.md) |
 | 3.2 Docker, ECS/EKS/serverless, AI scaling limits | Dockerfiles, `docker-compose.yml`, [DEPLOYMENT.md](docs/DEPLOYMENT.md) |
-| Bonus: vector store and RAG | pgvector, `backend/src/rag` |
-| Bonus: streaming | `/chat/stream`, `frontend/src/api/chatStream.ts` |
-| Bonus: tool calling | `backend/src/ai/tools`, off by default |
-| Bonus: background processing | BullMQ worker, [ADR 3](docs/adr/0003-bullmq-for-background-work.md) |
-| Bonus: cost estimate 1k / 10k / 100k | [COSTS.md](docs/COSTS.md) |
-| Bonus: multi-tenant isolation | [spec 012](specs/012-tenant-isolation.md), `tests/integration/tenant-isolation.test.ts` |
-| Deliverables: README, decisions, trade-offs, run locally | this file |
+| Extra: vector store and RAG | pgvector, `backend/src/rag` |
+| Extra: streaming | `/chat/stream`, `frontend/src/api/chatStream.ts` |
+| Extra: tool calling | `backend/src/ai/tools`, off by default |
+| Extra: background processing | BullMQ worker, [ADR 3](docs/adr/0003-bullmq-for-background-work.md) |
+| Extra: cost estimate 1k / 10k / 100k | [COSTS.md](docs/COSTS.md) |
+| Extra: multi-tenant isolation | [spec 012](specs/012-tenant-isolation.md), `tests/integration/tenant-isolation.test.ts` |
+| Documentation: README, decisions, trade-offs, run locally | this file |
 
 ## License
 

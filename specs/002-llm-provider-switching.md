@@ -1,6 +1,6 @@
 # 002 — Switchable LLM providers (OpenAI, Anthropic, Mock)
 
-**Brief:** 1.2 "Ability to switch LLM providers (mocked or abstracted is fine)".
+**Requirement:** 1.2 "Ability to switch LLM providers (mocked or abstracted is fine)".
 
 ## Current state (verified)
 - `LlmProvider` interface, `providerFactory.ts`, `OpenAIProvider` and `MockProvider` exist.

@@ -3,7 +3,7 @@
  * =========
  * Upload documents and ask questions about them.
  *
- * AI-aware behaviour (assessment 1.3):
+ * AI-aware behaviour (requirement 1.3):
  * - Model status: searching your documents → writing the answer, with a Stop button
  * - The answer streams in as a draft; sources and confidence appear when it is complete
  * - Uncertain or unsupported answers say so (see MessageBubble)

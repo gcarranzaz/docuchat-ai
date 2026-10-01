@@ -1,4 +1,4 @@
-# Deployment (brief sections 3.1 and 3.2)
+# Deployment (requirements 3.1 and 3.2)
 
 The infrastructure is in `infra/terraform/`. It has been validated (`terraform fmt`, `validate`, run in CI) but **never applied to a real AWS account**: no account was used for this exercise. Treat it as a reviewed starting point, and expect to adjust it on the first real `plan`.
 

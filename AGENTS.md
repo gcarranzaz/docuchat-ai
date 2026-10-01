@@ -7,5 +7,5 @@ Read `docs/constitution.md` and the active spec in `specs/` before changing code
 3. No secrets in the repo. Only `.env.example` with placeholders. Never read or copy `.env` files.
 4. The LLM never gets tools with side effects, and every query on user data filters by `user_id`.
 5. Prompt or default-model changes need `npm run eval` to pass (once spec 009 lands).
-6. Update `docs/COMPLIANCE.md` when a spec changes the status of a brief item.
+6. Update `docs/REQUIREMENTS.md` when a spec changes the status of a requirement.
 7. Git: commit as `gcarranzaz <carranzaz.gonzalo@gmail.com>` (set `git config --local` first). Don't add AI co-author trailers. Don't commit unless the maintainer asks.

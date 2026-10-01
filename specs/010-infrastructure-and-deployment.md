@@ -1,13 +1,13 @@
 # 010 — Infrastructure (Terraform/AWS), secrets, containers, deployment
 
-**Brief:** 3.1 "Infrastructure definition (Terraform or CloudFormation)", "Secure handling of secrets (no plaintext keys)", "Separation of config vs code", "Explain: where AI API keys live, how you would rotate them, how you'd scale under bursty AI usage". 3.2 "Dockerize backend", "Show how you'd deploy it: ECS, EKS, or serverless", "Explain scaling constraints specific to AI workloads".
+**Requirement:** 3.1 "Infrastructure definition (Terraform or CloudFormation)", "Secure handling of secrets (no plaintext keys)", "Separation of config vs code", "Explain: where AI API keys live, how you would rotate them, how you'd scale under bursty AI usage". 3.2 "Dockerize backend", "Show how you'd deploy it: ECS, EKS, or serverless", "Explain scaling constraints specific to AI workloads".
 
 ## Current state (before this spec)
-- `infra/terraform/main.tf` (787 lines) had the plaintext-secret pattern the brief warns about: database password, JWT secrets and API keys were Terraform variables, so they ended up in `.tfvars` and in state; the task role could read more than it needed; no HTTPS, no idle timeout for streaming, no autoscaling signal that fits AI traffic, no migration path.
+- `infra/terraform/main.tf` (787 lines) had the plaintext-secret pattern the requirements warn about: database password, JWT secrets and API keys were Terraform variables, so they ended up in `.tfvars` and in state; the task role could read more than it needed; no HTTPS, no idle timeout for streaming, no autoscaling signal that fits AI traffic, no migration path.
 - Backend and frontend Dockerfiles build.
 
 ## Scope
-- **Audit `main.tf` against the brief** and fix gaps:
+- **Audit `main.tf` against the requirements** and fix gaps:
   - API keys (OpenAI/Anthropic) and JWT secrets in AWS Secrets Manager; injected into the ECS task as `secrets` (not `environment`); Terraform creates the secret *containers*, values are set out of band and never appear in `.tfvars` or state in plaintext.
   - Database password generated and stored in Secrets Manager (not a variable default).
   - Non-secret config via variables, none baked into the image.
@@ -15,7 +15,7 @@
   - RDS encrypted with KMS, in private subnets, not publicly accessible; pgvector extension enabled by migration.
   - ALB idle timeout raised for streaming; health check on `/health`.
   - ECS service autoscaling (CPU and request count) with sensible min/max; worker service separate from the API service.
-- **`docs/DEPLOYMENT.md`** answering the brief:
+- **`docs/DEPLOYMENT.md`** answering the requirements:
   - *Where keys live:* Secrets Manager, injected by the execution role.
   - *Rotation:* overlap window per secret type.
   - *Bursty usage:* autoscaling on request count, a queue in front of the slow work, per-user limits (spec 006), provider rate limits as the real ceiling, retry with backoff and fallback, graceful degradation.

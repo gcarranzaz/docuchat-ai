@@ -1,6 +1,6 @@
 # Data handling: what is stored, for how long, and how personal data is treated
 
-This answers brief 2.1: what data is stored versus not, how long AI inputs and outputs are retained, and how PII, logging and auditability are handled. Every statement below is backed by code and, where marked, by a test.
+This covers requirement 2.1: what data is stored versus not, how long AI inputs and outputs are retained, and how PII, logging and auditability are handled. Every statement below is backed by code and, where marked, by a test.
 
 ## 1. What is stored, and what is not
 
@@ -64,7 +64,7 @@ Policy: **log identifiers, sizes, timings, token counts, model and prompt versio
 - **Failure policy:** best effort. If the insert fails, the failure is logged loudly (`AUDIT WRITE FAILED`) and the user's request continues. A regulated deployment might choose to fail closed; that is a one-line change and a product decision.
 - **Next step for production:** ship rows to immutable storage (S3 Object Lock) so that even a database administrator cannot rewrite history.
 
-## 6. Retrieval and vector store (bonus)
+## 6. Retrieval and vector store (extra)
 
 Documents are chunked (1,000 characters, 20 % overlap), embedded, and stored in Postgres with pgvector (HNSW index, cosine distance). Search is scoped to the caller inside the SQL; the top-k chunks, bounded by `MAX_CHUNKS_PER_QUERY`, are the only document text the model sees. Choosing pgvector over a separate vector store keeps documents, embeddings, ownership and deletion in one transactional system, which is what makes the erasure guarantee above simple and testable.
 
