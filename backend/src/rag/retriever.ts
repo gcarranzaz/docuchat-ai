@@ -1,0 +1,134 @@
+/**
+ * Document Retriever
+ * ==================
+ * Finds relevant document chunks for a query using vector similarity.
+ *
+ * How it works:
+ * 1. Embed the user's query
+ * 2. Search pgvector for similar chunks (cosine similarity)
+ * 3. Return top-K chunks with relevance scores
+ *
+ * Relevance score interpretation:
+ * - 0.9+: Very relevant, almost exact match
+ * - 0.7-0.9: Relevant, good context
+ * - 0.5-0.7: Somewhat relevant, may be useful
+ * - <0.5: Not very relevant
+ */
+
+import * as chunkRepo from '../repositories/chunk.repository.js';
+import { embedQuery } from './embeddings.js';
+import { getConfig } from '../config/index.js';
+import { logger } from '../utils/logger.js';
+import type { ChunkWithScore, DocChunk } from '../types/index.js';
+
+// ===========================================
+// Types
+// ===========================================
+
+export interface RetrievalOptions {
+  /** Maximum chunks to return */
+  topK?: number;
+  /** Minimum similarity score (0-1) */
+  minSimilarity?: number;
+  /** Filter to specific documents */
+  documentIds?: string[];
+}
+
+export interface RetrievalResult {
+  chunks: ChunkWithScore[];
+  query: string;
+  queryTokens: number;
+}
+
+// ===========================================
+// Retrieval Functions
+// ===========================================
+
+/**
+ * Retrieve relevant chunks for a query
+ */
+export async function retrieveChunks(
+  query: string,
+  userId: string,
+  options: RetrievalOptions = {}
+): Promise<RetrievalResult> {
+  const config = getConfig();
+  const topK = options.topK ?? config.maxChunksPerQuery;
+  // Use configured threshold (0.6 by default for production quality)
+  // Lower for mock provider (0.0) in dev/test if needed via env var
+  const minSimilarity = options.minSimilarity ?? config.minSimilarityThreshold;
+
+  logger.debug({ query, userId, topK, minSimilarity }, 'Starting chunk retrieval');
+
+  // Step 1: Embed the query
+  const { embedding, tokenCount } = await embedQuery(query, userId);
+
+  // Step 2: Find similar chunks
+  const chunks = await chunkRepo.findSimilar(userId, embedding, {
+    limit: topK,
+    documentIds: options.documentIds,
+    minSimilarity,
+  });
+
+  logger.debug({
+    query,
+    chunksFound: chunks.length,
+    topScore: chunks[0]?.score ?? 0,
+  }, 'Chunks retrieved');
+
+  return {
+    chunks,
+    query,
+    queryTokens: tokenCount,
+  };
+}
+
+/**
+ * Build context string from chunks for LLM prompt
+ * Includes chunk IDs for citation references
+ */
+export function buildContextFromChunks(chunks: ChunkWithScore[]): string {
+  if (chunks.length === 0) {
+    return 'No relevant documents found.';
+  }
+
+  const contextParts = chunks.map((item, index) => {
+    const { chunk, score } = item;
+    return `[chunk-${index}] (relevance: ${(score * 100).toFixed(0)}%)\n${chunk.content}`;
+  });
+
+  // Wrap context in explicit markers so prompt builders or mock providers can detect it
+  return `BEGIN_CONTEXT\n${contextParts.join('\n\n---\n\n')}\nEND_CONTEXT`;
+}
+
+/**
+ * Create a mapping from chunk index to chunk ID
+ * Used for resolving citations in responses
+ */
+export function createChunkMapping(chunks: ChunkWithScore[]): Map<string, DocChunk> {
+  const mapping = new Map<string, DocChunk>();
+
+  chunks.forEach((item, index) => {
+    mapping.set(`chunk-${index}`, item.chunk);
+  });
+
+  return mapping;
+}
+
+/**
+ * Calculate overall relevance score for a retrieval
+ * Used to determine confidence level
+ */
+export function calculateRetrievalScore(chunks: ChunkWithScore[]): number {
+  if (chunks.length === 0) return 0;
+
+  // Weighted average: higher weight for top results
+  const weights = chunks.map((_, i) => 1 / (i + 1));
+  const totalWeight = weights.reduce((a, b) => a + b, 0);
+
+  const weightedSum = chunks.reduce((sum, chunk, i) => {
+    return sum + chunk.score * (weights[i] ?? 0);
+  }, 0);
+
+  return weightedSum / totalWeight;
+}

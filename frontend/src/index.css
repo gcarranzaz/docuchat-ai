@@ -1,0 +1,169 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ===========================================
+   DocuChat - Global Styles
+   =========================================== */
+
+/* Base styles */
+body {
+  @apply bg-gray-50 text-gray-900 antialiased;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+}
+
+/* Focus visible for accessibility */
+*:focus-visible {
+  @apply outline-2 outline-offset-2 outline-blue-500;
+}
+
+/* ===========================================
+   AI-aware UX Components
+   =========================================== */
+
+/* Thinking/loading indicator */
+.ai-thinking {
+  @apply inline-flex items-center gap-2 text-amber-600;
+}
+
+.ai-thinking::before {
+  content: '';
+  @apply w-2 h-2 bg-amber-500 rounded-full animate-pulse;
+}
+
+/* Confidence badges */
+.confidence-high {
+  @apply bg-green-100 text-green-800 border-green-200;
+}
+
+.confidence-medium {
+  @apply bg-yellow-100 text-yellow-800 border-yellow-200;
+}
+
+.confidence-low {
+  @apply bg-orange-100 text-orange-800 border-orange-200;
+}
+
+.confidence-none {
+  @apply bg-gray-100 text-gray-600 border-gray-200;
+}
+
+/* Citation highlight */
+.citation {
+  @apply bg-blue-50 text-blue-700 px-1 py-0.5 rounded text-sm font-medium cursor-pointer
+         hover:bg-blue-100 transition-colors;
+}
+
+/* ===========================================
+   Chat UI
+   =========================================== */
+
+.chat-message {
+  @apply p-4 rounded-lg max-w-[85%];
+}
+
+.chat-message-user {
+  @apply bg-blue-600 text-white ml-auto;
+}
+
+.chat-message-assistant {
+  @apply bg-white border border-gray-200 shadow-sm;
+}
+
+/* ===========================================
+   Document upload
+   =========================================== */
+
+.upload-zone {
+  @apply border-2 border-dashed border-gray-300 rounded-lg p-8 text-center
+         transition-colors cursor-pointer
+         hover:border-blue-400 hover:bg-blue-50;
+}
+
+.upload-zone.drag-active {
+  @apply border-blue-500 bg-blue-50;
+}
+
+/* ===========================================
+   Accessibility: Screen reader only
+   =========================================== */
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+
+/* ===========================================
+   Loading skeleton
+   =========================================== */
+
+.skeleton {
+  @apply bg-gray-200 rounded animate-pulse;
+}
+
+/* ===========================================
+   JSON viewer
+   =========================================== */
+
+.json-viewer {
+  @apply font-mono text-sm bg-gray-900 text-gray-100 p-4 rounded-lg overflow-auto;
+}
+
+.json-key {
+  @apply text-purple-400;
+}
+
+.json-string {
+  @apply text-green-400;
+}
+
+.json-number {
+  @apply text-blue-400;
+}
+
+.json-boolean {
+  @apply text-yellow-400;
+}
+
+.json-null {
+  @apply text-gray-500;
+}
+
+/* ===========================================
+   Modal animations
+   =========================================== */
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes scaleIn {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.animate-fadeIn {
+  animation: fadeIn 0.2s ease-out;
+}
+
+.animate-scaleIn {
+  animation: scaleIn 0.2s ease-out;
+}

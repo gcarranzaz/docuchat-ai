@@ -1,0 +1,51 @@
+# ===================================
+# Example Terraform Variables
+# ===================================
+# Copy this file to terraform.tfvars and fill in your values
+
+# Environment Configuration
+environment  = "prod"
+project_name = "docuchat"
+aws_region   = "us-east-1"
+
+# Network Configuration
+vpc_cidr           = "10.0.0.0/16"
+availability_zones = ["us-east-1a", "us-east-1b"]
+
+# Database Configuration
+db_instance_class         = "db.t3.small"  # Use db.t3.micro for dev/testing
+db_allocated_storage      = 20
+db_max_allocated_storage  = 100
+db_name                   = "docuchat"
+db_username               = "docuchat_admin"
+db_password               = "CHANGE_ME_STRONG_PASSWORD_HERE" # Use AWS Secrets Manager in production
+
+# Redis Configuration
+redis_node_type       = "cache.t3.small"  # Use cache.t3.micro for dev/testing
+redis_num_cache_nodes = 2                 # Use 1 for dev/testing
+
+# ECS Configuration
+app_image      = "YOUR_AWS_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/docuchat:latest"
+app_port       = 3001
+app_count      = 2
+fargate_cpu    = 1024  # 1 vCPU
+fargate_memory = 2048  # 2GB
+
+# Auto Scaling Configuration
+autoscaling_min_capacity  = 2
+autoscaling_max_capacity  = 10
+autoscaling_cpu_threshold = 70
+
+# Secrets (NEVER commit these to version control!)
+openai_api_key     = "sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+jwt_secret         = "YOUR_RANDOM_32_CHAR_SECRET_HERE"
+jwt_refresh_secret = "YOUR_RANDOM_32_CHAR_REFRESH_SECRET_HERE"
+
+# Tags
+tags = {
+  Project     = "DocuChat"
+  ManagedBy   = "Terraform"
+  Environment = "prod"
+  Owner       = "your-team@example.com"
+  CostCenter  = "Engineering"
+}

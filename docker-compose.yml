@@ -1,0 +1,226 @@
+
+
+services:
+  # =====================================
+  # PostgreSQL with pgvector
+  # =====================================
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: docuchat-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: docuchat
+      POSTGRES_PASSWORD: docuchat_dev_password
+      POSTGRES_DB: docuchat
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # Auto-run init scripts on first start
+      - ./backend/migrations/000_init_pgvector.sql:/docker-entrypoint-initdb.d/000_init_pgvector.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U docuchat -d docuchat"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - docuchat-network
+
+  # =====================================
+  # Redis for job queues
+  # =====================================
+  redis:
+    image: redis:7-alpine
+    container_name: docuchat-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - docuchat-network
+
+  # =====================================
+  # Backend service
+  # =====================================
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: docuchat-backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+
+      # Database
+      DATABASE_URL: postgresql://docuchat:docuchat_dev_password@postgres:5432/docuchat
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: docuchat
+      DB_USER: docuchat
+      DB_PASSWORD: docuchat_dev_password
+
+      # Redis
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ""
+      REDIS_DB: 0
+
+      # Auth
+      JWT_SECRET: dev-jwt-secret-not-for-production-use-only
+      JWT_REFRESH_SECRET: dev-refresh-secret-not-for-production-use-only
+      JWT_EXPIRES_IN: 15m
+      JWT_REFRESH_EXPIRES_IN: 7d
+
+      # AI Provider (use 'mock' for development, 'openai' for real usage)
+      AI_PROVIDER: mock
+      # OPENAI_API_KEY: ${OPENAI_API_KEY}  # Uncomment and set in .env for real OpenAI usage
+      OPENAI_MODEL: gpt-4-turbo-preview
+      OPENAI_EMBEDDING_MODEL: text-embedding-3-small
+
+      # Vector search
+      MIN_SIMILARITY_THRESHOLD: 0.0  # Low for development with mock provider
+
+      # CORS
+      FRONTEND_URL: http://localhost
+
+      # Logging
+      LOG_LEVEL: info
+    ports:
+      - "3001:3001"
+    networks:
+      - docuchat-network
+    profiles:
+      - full
+
+  # =====================================
+  # Worker service (for processing embeddings)
+  # =====================================
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: docuchat-worker
+    restart: unless-stopped
+    command: ["node", "dist/workers/start-worker.js"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+
+      # Database
+      DATABASE_URL: postgresql://docuchat:docuchat_dev_password@postgres:5432/docuchat
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: docuchat
+      DB_USER: docuchat
+      DB_PASSWORD: docuchat_dev_password
+
+      # Redis
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ""
+      REDIS_DB: 0
+
+      # AI Provider
+      AI_PROVIDER: mock
+      # OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OPENAI_EMBEDDING_MODEL: text-embedding-3-small
+
+      # Logging
+      LOG_LEVEL: info
+    networks:
+      - docuchat-network
+    profiles:
+      - full
+
+  # =====================================
+  # Frontend service
+  # =====================================
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: docuchat-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "5173:80"
+    networks:
+      - docuchat-network
+    profiles:
+      - full
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  docuchat-network:
+    driver: bridge
+
+
+# ==========================================
+# Usage Instructions
+# ==========================================
+#
+# Development (Postgres + Redis only):
+#   docker-compose up -d postgres redis
+#   # Then run backend/frontend locally with `npm run dev`
+#
+# Full stack (All services):
+#   docker-compose --profile full up -d
+#
+# Full stack with logs:
+#   docker-compose --profile full up
+#
+# Access application:
+#   Frontend:  http://localhost
+#   Backend:   http://localhost:3001
+#   API Docs:  http://localhost:3001/api-docs (if available)
+#
+# View logs:
+#   docker-compose logs -f [service-name]
+#   docker-compose logs -f backend
+#   docker-compose logs -f worker
+#
+# Stop services:
+#   docker-compose down
+#
+# Stop and remove volumes (CAUTION: deletes all data):
+#   docker-compose down -v
+#
+# Rebuild after code changes:
+#   docker-compose --profile full build
+#   docker-compose --profile full up -d
+#
+# Run only database services:
+#   docker-compose up -d postgres redis
+#
+# Access database:
+#   docker exec -it docuchat-postgres psql -U docuchat -d docuchat
+#
+# Access Redis CLI:
+#   docker exec -it docuchat-redis redis-cli
+#
+# Monitor Redis queue:
+#   docker exec -it docuchat-redis redis-cli KEYS "*"
+#   docker exec -it docuchat-redis redis-cli LLEN "bull:embeddings:wait"
+#
+# ==========================================
