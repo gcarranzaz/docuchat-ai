@@ -19,7 +19,7 @@ import type { ApiResponse, ApiError, AuthTokens } from '../types';
 // Default to backend API URL in development if not provided via Vite env.
 // This avoids requests landing on the static frontend server (port 5173)
 // when `VITE_API_URL` is not set (e.g., docker/nginx static serve).
-const API_BASE_URL =
+export const API_BASE_URL =
   import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:3001' : '/api');
 
 // Token storage keys
@@ -145,7 +145,7 @@ async function handleResponse<T>(response: Response): Promise<ApiResponse<T>> {
   return { data: json as T };
 }
 
-async function attemptTokenRefresh(): Promise<boolean> {
+export async function attemptTokenRefresh(): Promise<boolean> {
   const refreshToken = getRefreshToken();
   if (!refreshToken) return false;
 
@@ -158,8 +158,11 @@ async function attemptTokenRefresh(): Promise<boolean> {
 
     if (!response.ok) return false;
 
-    const data = await response.json();
-    setTokens(data);
+    // The backend answers { message, tokens: { accessToken, refreshToken, expiresIn } }.
+    // Storing the whole body would save "undefined" as the access token and break every later call.
+    const data = (await response.json()) as { tokens?: AuthTokens };
+    if (!data.tokens?.accessToken || !data.tokens.refreshToken) return false;
+    setTokens(data.tokens);
     return true;
   } catch {
     return false;
@@ -179,6 +182,9 @@ export const api = {
 
   put: <T>(endpoint: string, body?: unknown, options?: RequestOptions) =>
     request<T>(endpoint, { ...options, method: 'PUT', body }),
+
+  patch: <T>(endpoint: string, body?: unknown, options?: RequestOptions) =>
+    request<T>(endpoint, { ...options, method: 'PATCH', body }),
 
   delete: <T>(endpoint: string, options?: RequestOptions) =>
     request<T>(endpoint, { ...options, method: 'DELETE' }),
@@ -278,8 +284,8 @@ export const documentApi = {
 
 export const chatApi = {
   // Send a chat message
-  sendMessage: (question: string, sessionId?: string, documentIds?: string[]) =>
-    api.post('/chat', { question, sessionId, documentIds }),
+  sendMessage: (question: string, sessionId?: string, documentIds?: string[], regenerate?: boolean) =>
+    api.post('/chat', { question, sessionId, documentIds, regenerate }),
 
   // List chat sessions
   listSessions: (limit = 20, offset = 0) =>
@@ -289,8 +295,14 @@ export const chatApi = {
   getSession: (sessionId: string) => api.get(`/chat/sessions/${sessionId}`),
 
   // Update session title
+  // The backend route is PATCH; with PUT the rename was answered 404
   updateSession: (sessionId: string, title: string) =>
-    api.put(`/chat/sessions/${sessionId}`, { title }),
+    api.patch(`/chat/sessions/${sessionId}`, { title }),
+
+  // Thumbs up/down on an answer; clearing removes the vote
+  setFeedback: (messageId: string, rating: 'up' | 'down', reason?: string) =>
+    api.put(`/chat/messages/${messageId}/feedback`, { rating, ...(reason ? { reason } : {}) }),
+  clearFeedback: (messageId: string) => api.delete(`/chat/messages/${messageId}/feedback`),
 
   // Delete session
   deleteSession: (sessionId: string) => api.delete(`/chat/sessions/${sessionId}`),

@@ -60,6 +60,8 @@ export interface Citation {
 
 export type ConfidenceLevel = 'HIGH' | 'MEDIUM' | 'LOW' | 'NONE';
 
+export type Rating = 'up' | 'down';
+
 export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';
@@ -67,6 +69,17 @@ export interface ChatMessage {
   citations?: Citation[];
   confidenceScore?: number;
   confidenceLevel?: ConfidenceLevel;
+  /**
+   * False means the answer is not backed by a valid citation (or there was no evidence):
+   * the UI must say so instead of presenting it as fact. Undefined for user messages.
+   */
+  grounded?: boolean;
+  /** Text still arriving. It is a draft until the final result replaces it. */
+  streaming?: boolean;
+  /** The user stopped generation: this is partial, unverified text. */
+  stopped?: boolean;
+  /** The current user's thumbs up/down on this answer */
+  rating?: Rating | null;
   createdAt: string;
 }
 
@@ -90,8 +103,18 @@ export interface ChatResponse {
   sessionId: string;
   messageId: string;
   citations: Citation[];
-  confidenceScore: number;
-  confidenceLevel: ConfidenceLevel;
+  grounded: boolean;
+  confidence: {
+    score: number;
+    level: ConfidenceLevel;
+    description: string;
+  };
+  metadata: {
+    chunksRetrieved: number;
+    tokensUsed: number;
+    promptVersion: string;
+    model: string;
+  };
 }
 
 // ===========================================
