@@ -21,6 +21,23 @@ dotenv.config();
 // ===========================================
 // Using zod for runtime validation + type inference
 
+/**
+ * Boolean env var. `z.coerce.boolean()` is unsafe here: Boolean("false") === true.
+ */
+function envBoolean(defaultValue: boolean) {
+  return z.preprocess((value) => {
+    if (value === undefined || value === '') return defaultValue;
+    if (typeof value === 'boolean') return value;
+    const normalized = String(value).trim().toLowerCase();
+    if (['true', '1', 'yes', 'on'].includes(normalized)) return true;
+    if (['false', '0', 'no', 'off'].includes(normalized)) return false;
+    return value; // let zod reject anything ambiguous
+  }, z.boolean());
+}
+
+const DEV_JWT_SECRET = 'dev-jwt-secret-change-me-in-production-32chars';
+const DEV_JWT_REFRESH_SECRET = 'dev-refresh-secret-change-me-in-prod-32c';
+
 const configSchema = z.object({
   // Server
   nodeEnv: z.enum(['development', 'production', 'test']).default('development'),
@@ -54,7 +71,7 @@ const configSchema = z.object({
   maxChunksPerQuery: z.coerce.number().int().positive().default(5),
   embeddingDimensions: z.coerce.number().int().positive().default(1536),
   minSimilarityThreshold: z.coerce.number().min(0).max(1).default(0.3), // Lowered from 0.6 to reduce false negatives
-  useStructuredOutput: z.coerce.boolean().default(true), // Use v2 structured JSON prompts
+  useStructuredOutput: envBoolean(true), // Use v2 structured JSON prompts
 
   // Rate Limiting
   rateLimitWindowMs: z.coerce.number().int().positive().default(60000),
@@ -66,7 +83,7 @@ const configSchema = z.object({
   frontendUrl: z.string().url().default('http://localhost:5173'),
 
   // Logging
-  logLevel: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
+  logLevel: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
 
   // Redis (for job queues and caching)
   redisHost: z.string().default('localhost'),
@@ -79,45 +96,57 @@ const configSchema = z.object({
 // Environment Variable Mapping
 // ===========================================
 
-function loadConfig() {
+export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
   const envMapping = {
-    nodeEnv: process.env['NODE_ENV'],
-    port: process.env['PORT'],
-    databaseUrl: process.env['DATABASE_URL'],
-    dbHost: process.env['DB_HOST'],
-    dbPort: process.env['DB_PORT'],
-    dbName: process.env['DB_NAME'],
-    dbUser: process.env['DB_USER'],
-    dbPassword: process.env['DB_PASSWORD'],
-    jwtSecret: process.env['JWT_SECRET'] || 'dev-jwt-secret-change-me-in-production-32chars',
-    jwtRefreshSecret: process.env['JWT_REFRESH_SECRET'] || 'dev-refresh-secret-change-me-in-prod-32c',
-    jwtExpiresIn: process.env['JWT_EXPIRES_IN'],
-    jwtRefreshExpiresIn: process.env['JWT_REFRESH_EXPIRES_IN'],
-    aiProvider: process.env['AI_PROVIDER'],
-    openaiApiKey: process.env['OPENAI_API_KEY'],
-    openaiModel: process.env['OPENAI_MODEL'],
-    openaiEmbeddingModel: process.env['OPENAI_EMBEDDING_MODEL'],
-    anthropicApiKey: process.env['ANTHROPIC_API_KEY'],
-    anthropicModel: process.env['ANTHROPIC_MODEL'],
-    maxTokensPerRequest: process.env['MAX_TOKENS_PER_REQUEST'],
-    maxDocumentSizeMb: process.env['MAX_DOCUMENT_SIZE_MB'],
-    maxChunksPerQuery: process.env['MAX_CHUNKS_PER_QUERY'],
-    embeddingDimensions: process.env['EMBEDDING_DIMENSIONS'],
-    minSimilarityThreshold: process.env['MIN_SIMILARITY_THRESHOLD'],
-    useStructuredOutput: process.env['USE_STRUCTURED_OUTPUT'],
-    rateLimitWindowMs: process.env['RATE_LIMIT_WINDOW_MS'],
-    rateLimitMaxRequests: process.env['RATE_LIMIT_MAX_REQUESTS'],
-    rateLimitChatMax: process.env['RATE_LIMIT_CHAT_MAX'],
-    rateLimitExtractMax: process.env['RATE_LIMIT_EXTRACT_MAX'],
-    frontendUrl: process.env['FRONTEND_URL'],
-    logLevel: process.env['LOG_LEVEL'],
-    redisHost: process.env['REDIS_HOST'],
-    redisPort: process.env['REDIS_PORT'],
-    redisPassword: process.env['REDIS_PASSWORD'],
-    redisDb: process.env['REDIS_DB'],
+    nodeEnv: env['NODE_ENV'],
+    port: env['PORT'],
+    databaseUrl: env['DATABASE_URL'],
+    dbHost: env['DB_HOST'],
+    dbPort: env['DB_PORT'],
+    dbName: env['DB_NAME'],
+    dbUser: env['DB_USER'],
+    dbPassword: env['DB_PASSWORD'],
+    jwtSecret: env['JWT_SECRET'] || DEV_JWT_SECRET,
+    jwtRefreshSecret: env['JWT_REFRESH_SECRET'] || DEV_JWT_REFRESH_SECRET,
+    jwtExpiresIn: env['JWT_EXPIRES_IN'],
+    jwtRefreshExpiresIn: env['JWT_REFRESH_EXPIRES_IN'],
+    aiProvider: env['AI_PROVIDER'],
+    openaiApiKey: env['OPENAI_API_KEY'],
+    openaiModel: env['OPENAI_MODEL'],
+    openaiEmbeddingModel: env['OPENAI_EMBEDDING_MODEL'],
+    anthropicApiKey: env['ANTHROPIC_API_KEY'],
+    anthropicModel: env['ANTHROPIC_MODEL'],
+    maxTokensPerRequest: env['MAX_TOKENS_PER_REQUEST'],
+    maxDocumentSizeMb: env['MAX_DOCUMENT_SIZE_MB'],
+    maxChunksPerQuery: env['MAX_CHUNKS_PER_QUERY'],
+    embeddingDimensions: env['EMBEDDING_DIMENSIONS'],
+    minSimilarityThreshold: env['MIN_SIMILARITY_THRESHOLD'],
+    useStructuredOutput: env['USE_STRUCTURED_OUTPUT'],
+    rateLimitWindowMs: env['RATE_LIMIT_WINDOW_MS'],
+    rateLimitMaxRequests: env['RATE_LIMIT_MAX_REQUESTS'],
+    rateLimitChatMax: env['RATE_LIMIT_CHAT_MAX'],
+    rateLimitExtractMax: env['RATE_LIMIT_EXTRACT_MAX'],
+    frontendUrl: env['FRONTEND_URL'],
+    logLevel: env['LOG_LEVEL'],
+    redisHost: env['REDIS_HOST'],
+    redisPort: env['REDIS_PORT'],
+    redisPassword: env['REDIS_PASSWORD'],
+    redisDb: env['REDIS_DB'],
   };
 
-  return configSchema.parse(envMapping);
+  const parsed = configSchema.parse(envMapping);
+
+  // Constitution #4: production must never run on the development secrets
+  if (parsed.nodeEnv === 'production') {
+    if (parsed.jwtSecret === DEV_JWT_SECRET || parsed.jwtRefreshSecret === DEV_JWT_REFRESH_SECRET) {
+      throw new Error('JWT_SECRET and JWT_REFRESH_SECRET must be set explicitly in production');
+    }
+    if (parsed.jwtSecret === parsed.jwtRefreshSecret) {
+      throw new Error('JWT_SECRET and JWT_REFRESH_SECRET must be different');
+    }
+  }
+
+  return parsed;
 }
 
 // ===========================================

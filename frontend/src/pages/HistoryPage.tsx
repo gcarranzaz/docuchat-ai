@@ -99,7 +99,6 @@ export default function HistoryPage() {
 
   // Extraction state
   const [extractions, setExtractions] = useState<Extraction[]>([]);
-  const [rawExtractionsResponse, setRawExtractionsResponse] = useState<any>(null); // DEBUG
   const [showCreateExtraction, setShowCreateExtraction] = useState(false);
   const [documents, setDocuments] = useState<Document[]>([]);
   const [schemas, setSchemas] = useState<Schema[]>([]);
@@ -182,7 +181,6 @@ export default function HistoryPage() {
     ]);
 
     // DEBUG: Mostrar la respuesta cruda en pantalla
-    setRawExtractionsResponse(extractionsRes);
 
     if (extractionsRes.error) {
       setError(extractionsRes.error.message || 'Failed to load extractions');

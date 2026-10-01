@@ -83,11 +83,18 @@ export const embeddingsQueueEvents = new QueueEvents(QUEUE_NAME, {
 });
 
 embeddingsQueueEvents.on('completed', ({ jobId, returnvalue }) => {
+  // QueueEvents delivers the return value as a JSON string
+  let result: Partial<EmbeddingJobResult> = {};
+  try {
+    result = typeof returnvalue === 'string' ? JSON.parse(returnvalue) : (returnvalue as Partial<EmbeddingJobResult>);
+  } catch {
+    // keep empty result; the job itself completed
+  }
   logger.info(
     {
       jobId,
-      documentId: returnvalue.documentId,
-      chunksCreated: returnvalue.chunksCreated,
+      documentId: result.documentId,
+      chunksCreated: result.chunksCreated,
     },
     'Embedding job completed'
   );
@@ -103,15 +110,8 @@ embeddingsQueueEvents.on('failed', ({ jobId, failedReason }) => {
   );
 });
 
-embeddingsQueueEvents.on('retrying', ({ jobId, attemptsMade }) => {
-  logger.warn(
-    {
-      jobId,
-      attemptsMade,
-    },
-    'Embedding job retrying'
-  );
-});
+// 'retrying' is not part of QueueEvents' typed listeners; a retry shows up as
+// a 'failed' event followed by a new attempt, which is already logged above.
 
 // ===========================================
 // Queue Operations
@@ -168,7 +168,7 @@ export async function getJobStatus(jobId: string): Promise<{
   } else if (state === 'failed') {
     response.error = job.failedReason;
   } else if (state === 'active') {
-    response.progress = job.progress;
+    response.progress = typeof job.progress === 'number' ? job.progress : undefined;
   }
 
   return response;
