@@ -80,6 +80,8 @@ export interface ChatMessage {
   outputTokens: number | null;
   metadata: Record<string, unknown>;
   createdAt: Date;
+  /** The caller's own thumbs up/down, present when messages are listed for a session */
+  feedbackRating?: 'up' | 'down' | null;
 }
 
 export interface Extraction {

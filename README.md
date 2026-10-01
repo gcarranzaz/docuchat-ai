@@ -20,7 +20,7 @@ The project **starts from an earlier personal prototype of mine**, [`fullstack-a
 | Docker files and a Terraform draft | Terraform rewritten (no secret as an input), compose that actually runs the full stack, secrets check in CI |
 | | Cost control (atomic per-user budget, Redis rate limits, answer cache), tenant isolation tests, audit log, retention, account erasure, evaluation set and regression check, optional read-only tool calling |
 
-Things the prototype did not do that I found while testing it: it did not compile (TypeScript errors in backend and frontend), the backend Docker image could not be built (`.dockerignore` excluded the lockfile), one route let any user read another user's embedding-job status, async route errors left requests hanging, and `docker compose --profile full` never ran migrations. All are fixed and have tests or a verified run.
+Things the prototype did not do that I found while testing it: it did not compile (TypeScript errors in backend and frontend), the backend Docker image could not be built (`.dockerignore` excluded the lockfile), one route let any user read another user's embedding-job status, async route errors left requests hanging, the chat history API returned raw database rows (the History page showed "Invalid Date" and no message count), and `docker compose --profile full` never ran migrations. All are fixed and have tests or a verified run.
 
 ## Quick start (2 minutes, no API keys)
 

@@ -145,9 +145,9 @@ describe('feedback', () => {
 
     const session = await api().get(`/chat/sessions/${sessionId}`).set(bearer(user)).timeout(TIMEOUT);
     const assistant = session.body.messages.find((m: { id: string }) => m.id === messageId);
-    expect(assistant.feedback_rating).toBe('up');
+    expect(assistant.feedbackRating).toBe('up');
     const userMessage = session.body.messages.find((m: { role: string }) => m.role === 'user');
-    expect(userMessage.feedback_rating).toBeNull();
+    expect(userMessage.feedbackRating).toBeNull();
   });
 
   it('clears a vote', async () => {

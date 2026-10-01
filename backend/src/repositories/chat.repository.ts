@@ -30,6 +30,74 @@ import type { ChatSession, ChatMessage } from '../types/index.js';
 const pool = getPool();
 
 // ===========================================
+// Row mapping
+// ===========================================
+// PostgreSQL columns are snake_case and DECIMAL columns arrive as strings. Callers (services, the API
+// and the frontend) work with the camelCase types in types/index.ts, so every query result goes
+// through these two functions. Casting raw rows instead made fields such as createdAt and
+// messageCount undefined in the API ("Invalid Date" in the History page).
+
+interface SessionRow {
+  id: string;
+  user_id: string;
+  title: string | null;
+  document_ids: string[] | null;
+  metadata: Record<string, unknown> | null;
+  created_at: Date;
+  updated_at: Date;
+  message_count?: number;
+  last_message_at?: Date | null;
+}
+
+interface MessageRow {
+  id: string;
+  session_id: string;
+  user_id: string;
+  role: ChatMessage['role'];
+  content: string;
+  citations: ChatMessage['citations'];
+  confidence_score: string | number | null;
+  prompt_version: string | null;
+  model_used: string | null;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  metadata: Record<string, unknown> | null;
+  created_at: Date;
+  feedback_rating?: 'up' | 'down' | null;
+}
+
+function toSession(row: SessionRow): ChatSession {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    title: row.title,
+    documentIds: row.document_ids ?? [],
+    metadata: row.metadata ?? {},
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function toMessage(row: MessageRow): ChatMessage {
+  return {
+    id: row.id,
+    sessionId: row.session_id,
+    userId: row.user_id,
+    role: row.role,
+    content: row.content,
+    citations: row.citations ?? null,
+    confidenceScore: row.confidence_score === null || row.confidence_score === undefined ? null : Number(row.confidence_score),
+    promptVersion: row.prompt_version,
+    modelUsed: row.model_used,
+    inputTokens: row.input_tokens,
+    outputTokens: row.output_tokens,
+    metadata: row.metadata ?? {},
+    createdAt: row.created_at,
+    ...(row.feedback_rating !== undefined && { feedbackRating: row.feedback_rating }),
+  };
+}
+
+// ===========================================
 // Types
 // ===========================================
 
@@ -84,7 +152,7 @@ export async function createSession(input: CreateSessionInput): Promise<ChatSess
 
   const result = await pool.query(query, [input.userId, input.title || 'New Chat']);
 
-  return result.rows[0] as ChatSession;
+  return toSession(result.rows[0] as SessionRow);
 }
 
 /**
@@ -101,7 +169,7 @@ export async function findSessionById(
 
   const result = await pool.query(query, [sessionId, userId]);
 
-  return result.rows[0] || null;
+  return result.rows[0] ? toSession(result.rows[0] as SessionRow) : null;
 }
 
 /**
@@ -139,7 +207,11 @@ export async function findSessionsByUser(
   ]);
 
   return {
-    sessions: sessionsResult.rows as SessionWithMessageCount[],
+    sessions: (sessionsResult.rows as SessionRow[]).map((row) => ({
+      ...toSession(row),
+      messageCount: row.message_count ?? 0,
+      lastMessageAt: row.last_message_at ?? row.created_at,
+    })),
     total: parseInt(countResult.rows[0]?.total ?? '0'),
   };
 }
@@ -161,7 +233,7 @@ export async function updateSessionTitle(
 
   const result = await pool.query(query, [title, sessionId, userId]);
 
-  return result.rows[0] || null;
+  return result.rows[0] ? toSession(result.rows[0] as SessionRow) : null;
 }
 
 /**
@@ -221,7 +293,7 @@ export async function createMessage(input: CreateMessageInput): Promise<ChatMess
     JSON.stringify(input.metadata ?? {}),
   ]);
 
-  return result.rows[0] as ChatMessage;
+  return toMessage(result.rows[0] as MessageRow);
 }
 
 /**
@@ -242,7 +314,7 @@ export async function findMessagesBySession(
 
   const result = await pool.query(query, [sessionId, userId]);
 
-  return result.rows as ChatMessage[];
+  return (result.rows as MessageRow[]).map(toMessage);
 }
 
 /**
@@ -259,7 +331,7 @@ export async function findMessageById(
 
   const result = await pool.query(query, [messageId, userId]);
 
-  return result.rows[0] || null;
+  return result.rows[0] ? toMessage(result.rows[0] as MessageRow) : null;
 }
 
 /**
@@ -278,5 +350,5 @@ export async function findRecentMessages(
 
   const result = await pool.query(query, [userId, limit]);
 
-  return result.rows as ChatMessage[];
+  return (result.rows as MessageRow[]).map(toMessage);
 }
