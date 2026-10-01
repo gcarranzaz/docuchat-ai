@@ -13,7 +13,7 @@ services:
       POSTGRES_PASSWORD: docuchat_dev_password
       POSTGRES_DB: docuchat
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432" # set POSTGRES_PORT if 5432 is taken on your machine
     volumes:
       - postgres_data:/var/lib/postgresql/data
       # Auto-run init scripts on first start
@@ -34,7 +34,7 @@ services:
     container_name: docuchat-redis
     restart: unless-stopped
     ports:
-      - "6379:6379"
+      - "${REDIS_HOST_PORT:-6379}:6379" # set REDIS_HOST_PORT if 6379 is taken
     command: redis-server --appendonly yes
     volumes:
       - redis_data:/data
@@ -45,6 +45,33 @@ services:
       retries: 5
     networks:
       - docuchat-network
+
+  # =====================================
+  # Migrations (one-off, runs to completion before the API and worker start)
+  # =====================================
+  migrate:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: docuchat-migrate
+    command: ["node", "dist/config/migrate.js"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: docuchat
+      DB_USER: docuchat
+      DB_PASSWORD: docuchat_dev_password
+      DB_SSL: disable # local Postgres has no TLS; production uses DB_SSL=verify (docs/DEPLOYMENT.md)
+      JWT_SECRET: dev-jwt-secret-not-for-production-use-only
+      JWT_REFRESH_SECRET: dev-refresh-secret-not-for-production-use-only
+    networks:
+      - docuchat-network
+    profiles:
+      - full
 
   # =====================================
   # Backend service
@@ -60,6 +87,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     environment:
       NODE_ENV: production
       PORT: 3001
@@ -71,6 +100,7 @@ services:
       DB_NAME: docuchat
       DB_USER: docuchat
       DB_PASSWORD: docuchat_dev_password
+      DB_SSL: disable # local Postgres has no TLS
 
       # Redis
       REDIS_HOST: redis
@@ -84,17 +114,25 @@ services:
       JWT_EXPIRES_IN: 15m
       JWT_REFRESH_EXPIRES_IN: 7d
 
-      # AI Provider (use 'mock' for development, 'openai' for real usage)
-      AI_PROVIDER: mock
-      # OPENAI_API_KEY: ${OPENAI_API_KEY}  # Uncomment and set in .env for real OpenAI usage
+      # AI provider: mock by default (no keys needed). To use a real one, put the values in a .env file
+      # next to this compose file (never commit it), for example:
+      #   AI_PROVIDER=anthropic  ANTHROPIC_API_KEY=...  OPENAI_API_KEY=...  MIN_SIMILARITY_THRESHOLD=0.6
+      # Anthropic has no embeddings API, so embeddings still need OPENAI_API_KEY (or stay on the mock).
+      AI_PROVIDER: ${AI_PROVIDER:-mock}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-5-5}
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-auto}
+      AI_FALLBACK_PROVIDER: ${AI_FALLBACK_PROVIDER:-none}
+      TOOLS_ENABLED: ${TOOLS_ENABLED:-false}
       OPENAI_MODEL: gpt-4-turbo-preview
       OPENAI_EMBEDDING_MODEL: text-embedding-3-small
 
-      # Vector search
-      MIN_SIMILARITY_THRESHOLD: 0.0  # Low for development with mock provider
+      # Vector search. 0.0 because mock embeddings are not semantic; use 0.6 with a real embedding model.
+      MIN_SIMILARITY_THRESHOLD: ${MIN_SIMILARITY_THRESHOLD:-0.0}
 
       # CORS
-      FRONTEND_URL: http://localhost
+      FRONTEND_URL: http://localhost:5173
 
       # Logging
       LOG_LEVEL: info
@@ -115,11 +153,16 @@ services:
     container_name: docuchat-worker
     restart: unless-stopped
     command: ["node", "dist/workers/start-worker.js"]
+    # The image's HEALTHCHECK probes the API's HTTP port; the worker has none
+    healthcheck:
+      disable: true
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     environment:
       NODE_ENV: production
 
@@ -130,6 +173,7 @@ services:
       DB_NAME: docuchat
       DB_USER: docuchat
       DB_PASSWORD: docuchat_dev_password
+      DB_SSL: disable # local Postgres has no TLS
 
       # Redis
       REDIS_HOST: redis
@@ -137,9 +181,15 @@ services:
       REDIS_PASSWORD: ""
       REDIS_DB: 0
 
-      # AI Provider
-      AI_PROVIDER: mock
-      # OPENAI_API_KEY: ${OPENAI_API_KEY}
+      # Auth settings are validated at startup in every process, workers included
+      JWT_SECRET: dev-jwt-secret-not-for-production-use-only
+      JWT_REFRESH_SECRET: dev-refresh-secret-not-for-production-use-only
+
+      # AI provider (embeddings run here, so it needs the same provider settings as the API)
+      AI_PROVIDER: ${AI_PROVIDER:-mock}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-auto}
       OPENAI_EMBEDDING_MODEL: text-embedding-3-small
 
       # Logging
@@ -191,7 +241,7 @@ networks:
 #   docker-compose --profile full up
 #
 # Access application:
-#   Frontend:  http://localhost
+#   Frontend:  http://localhost:5173
 #   Backend:   http://localhost:3001
 #   API Docs:  http://localhost:3001/api-docs (if available)
 #
