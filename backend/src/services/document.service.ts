@@ -18,8 +18,10 @@ import pdfParse from 'pdf-parse';
 import * as documentRepo from '../repositories/document.repository.js';
 import { enqueueEmbeddingJob } from '../queues/embeddings.queue.js';
 import { getLlmProvider } from '../ai/providers/providerFactory.js';
+import { buildSummaryPrompt } from '../ai/prompts/promptBuilder.js';
 import { errors } from '../middleware/error.middleware.js';
 import { logger } from '../utils/logger.js';
+import * as audit from './audit.service.js';
 import type { Document } from '../types/index.js';
 import {
   ALLOWED_MIME_TYPES,
@@ -43,22 +45,10 @@ async function generateAiSummary(content: string, title: string): Promise<Docume
   try {
     const llm = getLlmProvider();
 
-    const prompt = {
-      systemPrompt: 'You are a document analyzer. Respond only with valid JSON.',
-      userPrompt: `Analyze this document and respond with JSON:
-{
-  "summary": "2-3 sentences in English summarizing the main content",
-  "keyTopics": ["topic1", "topic2", "topic3"],
-  "documentType": "report" | "guide" | "article" | "manual" | "other"
-}
+    // Title and content are untrusted: the builder wraps both in nonce delimiters
+    const prompt = buildSummaryPrompt({ title, content });
 
-Title: ${title}
-Content (first 2000 chars): ${content.substring(0, 2000)}
-
-Respond with ONLY the JSON object, no markdown formatting.`,
-    };
-
-    const result = await llm.complete(prompt);
+    const result = await llm.complete({ systemPrompt: prompt.systemPrompt, userPrompt: prompt.userPrompt });
 
     // Parse JSON response
     let parsed: DocumentSummary;
@@ -71,7 +61,7 @@ Respond with ONLY the JSON object, no markdown formatting.`,
         parsed = JSON.parse(result.content);
       }
     } catch (parseError) {
-      logger.warn({ content: result.content }, 'Failed to parse LLM JSON response');
+      logger.warn({ responseLength: result.content.length }, 'Failed to parse LLM JSON response');
       // Fallback to basic summary
       return {
         summary: content.substring(0, 300) + '...',
@@ -80,10 +70,10 @@ Respond with ONLY the JSON object, no markdown formatting.`,
       };
     }
 
-    logger.info({ title, summary: parsed.summary }, 'AI summary generated');
+    logger.info({ titleLength: title.length, summaryLength: parsed.summary?.length ?? 0 }, 'AI summary generated');
     return parsed;
   } catch (error) {
-    logger.error({ err: error, title }, 'Failed to generate AI summary');
+    logger.error({ err: error }, 'Failed to generate AI summary');
     // Return basic summary as fallback
     return {
       summary: content.substring(0, 300) + '...',
@@ -118,6 +108,13 @@ export async function createTextDocument(
     { userId, documentId: document.id, contentLength: content.length },
     'Text document created'
   );
+  await audit.record({
+    action: 'document.create',
+    userId,
+    resourceType: 'document',
+    resourceId: document.id,
+    metadata: { mimeType: 'text/plain', characters: content.length },
+  });
 
   // Generate AI summary (sync - blocks for ~5-10s but provides immediate value)
   try {
@@ -252,6 +249,14 @@ export async function createPdfDocument(
     logger.error({ err: error, documentId: document.id }, 'Failed to enqueue PDF embedding job');
   }
 
+  await audit.record({
+    action: 'document.create',
+    userId,
+    resourceType: 'document',
+    resourceId: document.id,
+    metadata: { mimeType: document.mimeType, characters: extractedText.length },
+  });
+
   return document;
 }
 
@@ -306,6 +311,7 @@ export async function deleteDocument(
   }
 
   logger.info({ userId, documentId }, 'Document deleted');
+  await audit.record({ action: 'document.delete', userId, resourceType: 'document', resourceId: documentId });
 }
 
 // ===========================================

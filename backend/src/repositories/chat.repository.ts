@@ -53,6 +53,13 @@ export interface CreateMessageInput {
     level: string;
   };
   promptVersion?: string;
+  /** Extra facts about the answer (grounded, cached, repaired...), stored as JSON */
+  metadata?: Record<string, unknown>;
+  /** Model that produced an assistant message (stored in model_used) */
+  model?: string;
+  inputTokens?: number;
+  outputTokens?: number;
+  /** Legacy: used as input_tokens when inputTokens is not given */
   tokensUsed?: number;
 }
 
@@ -193,9 +200,10 @@ export async function createMessage(input: CreateMessageInput): Promise<ChatMess
       prompt_version,
       model_used,
       input_tokens,
-      output_tokens
+      output_tokens,
+      metadata
     )
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
     RETURNING *
   `;
 
@@ -207,9 +215,10 @@ export async function createMessage(input: CreateMessageInput): Promise<ChatMess
     input.citations ? JSON.stringify(input.citations) : null,
     input.confidence ? input.confidence.score : null,
     input.promptVersion || null,
-    null, // model_used (not provided by caller)
-    input.tokensUsed || null, // input_tokens
-    null, // output_tokens (not known at insert time)
+    input.model || null,
+    input.inputTokens ?? input.tokensUsed ?? null,
+    input.outputTokens ?? null,
+    JSON.stringify(input.metadata ?? {}),
   ]);
 
   return result.rows[0] as ChatMessage;
@@ -222,10 +231,13 @@ export async function findMessagesBySession(
   sessionId: string,
   userId: string
 ): Promise<ChatMessage[]> {
+  // feedback_rating: the user's own thumbs up/down on an assistant answer (null if none)
   const query = `
-    SELECT * FROM chat_messages
-    WHERE session_id = $1 AND user_id = $2
-    ORDER BY created_at ASC
+    SELECT m.*, f.rating AS feedback_rating
+    FROM chat_messages m
+    LEFT JOIN message_feedback f ON f.message_id = m.id AND f.user_id = m.user_id
+    WHERE m.session_id = $1 AND m.user_id = $2
+    ORDER BY m.created_at ASC
   `;
 
   const result = await pool.query(query, [sessionId, userId]);

@@ -24,12 +24,7 @@ import type { EmbeddingJobData, EmbeddingJobResult } from '../queues/embeddings.
 
 const QUEUE_NAME = 'embeddings';
 
-const redisConnection = {
-  host: config.redis.host,
-  port: config.redis.port,
-  password: config.redis.password,
-  db: config.redis.db,
-};
+const redisConnection = { ...config.redis };
 
 // ===========================================
 // Worker Instance

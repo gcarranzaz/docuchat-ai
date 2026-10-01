@@ -42,6 +42,9 @@ const configSchema = z.object({
   // Server
   nodeEnv: z.enum(['development', 'production', 'test']).default('development'),
   port: z.coerce.number().int().positive().default(3001),
+  // Number of reverse proxies in front of the API (0 = none; 1 = a single load balancer).
+  // Needed so req.ip is the client's address and not the balancer's.
+  trustProxy: z.coerce.number().int().min(0).max(5).default(0),
 
   // Database
   databaseUrl: z.string().url().optional(),
@@ -63,7 +66,25 @@ const configSchema = z.object({
   openaiModel: z.string().default('gpt-4-turbo-preview'),
   openaiEmbeddingModel: z.string().default('text-embedding-3-small'),
   anthropicApiKey: z.string().optional(),
-  anthropicModel: z.string().default('claude-3-sonnet-20240229'),
+  anthropicModel: z.string().default('claude-sonnet-5-5'),
+  // Optional. Leave unset for current Claude models: they reject the temperature parameter.
+  anthropicTemperature: z.preprocess(
+    (value) => (value === '' || value === undefined ? undefined : value),
+    z.coerce.number().min(0).max(1).optional()
+  ),
+
+  // Mock provider only: delay between streamed words, in ms. Raise it to watch streaming in a browser.
+  mockStreamDelayMs: z.coerce.number().int().min(0).default(2),
+
+  // Provider behaviour
+  // Embeddings are configured apart from completions: Anthropic has no embeddings API.
+  // 'auto' follows AI_PROVIDER (and uses OpenAI when completions run on Anthropic).
+  embeddingProvider: z.enum(['auto', 'openai', 'mock']).default('auto'),
+  // 'mock' is intentionally not allowed here: it would return fake answers as real ones.
+  aiFallbackProvider: z.enum(['none', 'openai', 'anthropic']).default('none'),
+  aiMaxRetries: z.coerce.number().int().min(0).max(5).default(2),
+  aiRetryBaseDelayMs: z.coerce.number().int().positive().default(500),
+  aiTimeoutMs: z.coerce.number().int().positive().default(30000),
 
   // AI Limits
   maxTokensPerRequest: z.coerce.number().int().positive().default(4096),
@@ -71,9 +92,58 @@ const configSchema = z.object({
   maxChunksPerQuery: z.coerce.number().int().positive().default(5),
   embeddingDimensions: z.coerce.number().int().positive().default(1536),
   minSimilarityThreshold: z.coerce.number().min(0).max(1).default(0.3), // Lowered from 0.6 to reduce false negatives
-  useStructuredOutput: envBoolean(true), // Use v2 structured JSON prompts
+
+  // Prompts (see ai/prompts/registry.ts; an unknown version fails at startup)
+  promptVersionChat: z.string().min(1).default('v3.0'),
+  promptVersionExtract: z.string().min(1).default('v2.0'),
+
+  // Mask personal data (emails, phones, card/national ids, IBANs, IPs) in everything sent to an AI
+  // provider. Stored text and answers are unchanged. Off by default: it costs answer quality.
+  redactPiiBeforeLlm: envBoolean(false),
+
+  // Retention (days). The retention job runs daily in the worker. 0 turns a rule off.
+  // Documents and conversations are kept until the user deletes them unless RETENTION_CONVERSATION_DAYS is set.
+  retentionUsageDays: z.coerce.number().int().min(0).default(90),
+  retentionAuditDays: z.coerce.number().int().min(0).default(365),
+  retentionBudgetDays: z.coerce.number().int().min(0).default(400),
+  retentionConversationDays: z.coerce.number().int().min(0).default(0),
+
+  // On SIGTERM (a deploy, a scale-in) stop taking new connections and give in-flight requests,
+  // streamed answers included, this long to finish before exiting. Keep it below the platform's
+  // kill timeout (ECS stopTimeout).
+  shutdownGraceMs: z.coerce.number().int().min(0).default(25000),
+
+  // Tool calling (spec 011): off by default. Read-only tools only; the loop is bounded by toolMaxRounds.
+  // Not available on /chat/stream (a tool round needs complete turns, not a token stream).
+  toolsEnabled: envBoolean(false),
+  toolMaxRounds: z.coerce.number().int().min(0).max(5).default(2),
+
+  // Input safety
+  maxQuestionChars: z.coerce.number().int().positive().default(2000),
+  // Heuristic detector: flags likely prompt injection in logs/usage metadata, never blocks or rewrites
+  injectionDetection: envBoolean(true),
+
+  // Conversation memory sent to the model: most recent turns, capped by characters
+  chatHistoryTurns: z.coerce.number().int().min(0).max(20).default(4),
+  chatHistoryMaxChars: z.coerce.number().int().min(0).default(4000),
+
+  // Cost control: per-user budgets (0 disables a limit). Checked and debited atomically before each model call.
+  userDailyTokenBudget: z.coerce.number().int().min(0).default(200000),
+  userMonthlyCostCapUsd: z.coerce.number().min(0).default(5),
+  // Prices (USD per 1M tokens). Unknown models use the conservative fallback, never zero.
+  modelPricingJson: z.string().optional(),
+  unknownModelPriceInput: z.coerce.number().nonnegative().default(10),
+  unknownModelPriceOutput: z.coerce.number().nonnegative().default(30),
+
+  // Answer cache (Redis). Per user, short TTL, first turn of a conversation only.
+  aiCacheEnabled: envBoolean(true),
+  aiCacheTtlSeconds: z.coerce.number().int().positive().default(300),
 
   // Rate Limiting
+  rateLimitEnabled: envBoolean(true),
+  rateLimitUploadMax: z.coerce.number().int().positive().default(10),
+  rateLimitAuthMax: z.coerce.number().int().positive().default(10),
+  rateLimitAuthWindowMs: z.coerce.number().int().positive().default(900000),
   rateLimitWindowMs: z.coerce.number().int().positive().default(60000),
   rateLimitMaxRequests: z.coerce.number().int().positive().default(20),
   rateLimitChatMax: z.coerce.number().int().positive().default(10),
@@ -85,11 +155,18 @@ const configSchema = z.object({
   // Logging
   logLevel: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
 
+  // Database TLS. auto = verify in production (against dbSslCaFile, e.g. the RDS CA bundle), off elsewhere.
+  // no-verify encrypts but does not check the server certificate: a stop-gap, never the production setting.
+  dbSsl: z.enum(['auto', 'disable', 'verify', 'no-verify']).default('auto'),
+  dbSslCaFile: z.string().optional(),
+
   // Redis (for job queues and caching)
   redisHost: z.string().default('localhost'),
   redisPort: z.coerce.number().int().positive().default(6379),
   redisPassword: z.string().optional(),
   redisDb: z.coerce.number().int().nonnegative().default(0),
+  // TLS to Redis (ElastiCache with in-transit encryption requires it)
+  redisTls: envBoolean(false),
 });
 
 // ===========================================
@@ -100,6 +177,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
   const envMapping = {
     nodeEnv: env['NODE_ENV'],
     port: env['PORT'],
+    trustProxy: env['TRUST_PROXY'],
     databaseUrl: env['DATABASE_URL'],
     dbHost: env['DB_HOST'],
     dbPort: env['DB_PORT'],
@@ -116,12 +194,43 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
     openaiEmbeddingModel: env['OPENAI_EMBEDDING_MODEL'],
     anthropicApiKey: env['ANTHROPIC_API_KEY'],
     anthropicModel: env['ANTHROPIC_MODEL'],
+    anthropicTemperature: env['ANTHROPIC_TEMPERATURE'],
+    mockStreamDelayMs: env['MOCK_STREAM_DELAY_MS'],
+    embeddingProvider: env['EMBEDDING_PROVIDER'],
+    aiFallbackProvider: env['AI_FALLBACK_PROVIDER'],
+    aiMaxRetries: env['AI_MAX_RETRIES'],
+    aiRetryBaseDelayMs: env['AI_RETRY_BASE_DELAY_MS'],
+    aiTimeoutMs: env['AI_TIMEOUT_MS'],
     maxTokensPerRequest: env['MAX_TOKENS_PER_REQUEST'],
     maxDocumentSizeMb: env['MAX_DOCUMENT_SIZE_MB'],
     maxChunksPerQuery: env['MAX_CHUNKS_PER_QUERY'],
     embeddingDimensions: env['EMBEDDING_DIMENSIONS'],
     minSimilarityThreshold: env['MIN_SIMILARITY_THRESHOLD'],
-    useStructuredOutput: env['USE_STRUCTURED_OUTPUT'],
+    promptVersionChat: env['PROMPT_VERSION_CHAT'],
+    promptVersionExtract: env['PROMPT_VERSION_EXTRACT'],
+    redactPiiBeforeLlm: env['REDACT_PII_BEFORE_LLM'],
+    retentionUsageDays: env['RETENTION_USAGE_DAYS'],
+    retentionAuditDays: env['RETENTION_AUDIT_DAYS'],
+    retentionBudgetDays: env['RETENTION_BUDGET_DAYS'],
+    retentionConversationDays: env['RETENTION_CONVERSATION_DAYS'],
+    shutdownGraceMs: env['SHUTDOWN_GRACE_MS'],
+    toolsEnabled: env['TOOLS_ENABLED'],
+    toolMaxRounds: env['TOOL_MAX_ROUNDS'],
+    maxQuestionChars: env['MAX_QUESTION_CHARS'],
+    injectionDetection: env['INJECTION_DETECTION'],
+    chatHistoryTurns: env['CHAT_HISTORY_TURNS'],
+    chatHistoryMaxChars: env['CHAT_HISTORY_MAX_CHARS'],
+    userDailyTokenBudget: env['USER_DAILY_TOKEN_BUDGET'],
+    userMonthlyCostCapUsd: env['USER_MONTHLY_COST_CAP_USD'],
+    modelPricingJson: env['MODEL_PRICING_JSON'],
+    unknownModelPriceInput: env['UNKNOWN_MODEL_PRICE_INPUT'],
+    unknownModelPriceOutput: env['UNKNOWN_MODEL_PRICE_OUTPUT'],
+    aiCacheEnabled: env['AI_CACHE_ENABLED'],
+    aiCacheTtlSeconds: env['AI_CACHE_TTL_SECONDS'],
+    rateLimitEnabled: env['RATE_LIMIT_ENABLED'],
+    rateLimitUploadMax: env['RATE_LIMIT_UPLOAD_MAX'],
+    rateLimitAuthMax: env['RATE_LIMIT_AUTH_MAX'],
+    rateLimitAuthWindowMs: env['RATE_LIMIT_AUTH_WINDOW_MS'],
     rateLimitWindowMs: env['RATE_LIMIT_WINDOW_MS'],
     rateLimitMaxRequests: env['RATE_LIMIT_MAX_REQUESTS'],
     rateLimitChatMax: env['RATE_LIMIT_CHAT_MAX'],
@@ -132,6 +241,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
     redisPort: env['REDIS_PORT'],
     redisPassword: env['REDIS_PASSWORD'],
     redisDb: env['REDIS_DB'],
+    redisTls: env['REDIS_TLS'],
+    dbSsl: env['DB_SSL'],
+    dbSslCaFile: env['DB_SSL_CA_FILE'],
   };
 
   const parsed = configSchema.parse(envMapping);
@@ -184,18 +296,8 @@ export function getDatabaseUrl(): string {
   return `postgresql://${config.dbUser}:${config.dbPassword}@${config.dbHost}:${config.dbPort}/${config.dbName}`;
 }
 
-// Validate AI provider has required keys
-export function validateAiConfig(): void {
-  const config = getConfig();
-
-  if (config.aiProvider === 'openai' && !config.openaiApiKey) {
-    throw new Error('OPENAI_API_KEY is required when AI_PROVIDER=openai');
-  }
-
-  if (config.aiProvider === 'anthropic' && !config.anthropicApiKey) {
-    throw new Error('ANTHROPIC_API_KEY is required when AI_PROVIDER=anthropic');
-  }
-}
+// AI provider key validation lives in ai/providers/providerFactory.ts (buildProviders),
+// where it runs at startup in production.
 
 // Export a named config instance for convenience
 export const config = {
@@ -219,6 +321,8 @@ export const config = {
       port: cfg.redisPort,
       password: cfg.redisPassword,
       db: cfg.redisDb,
+      // Every Redis connection (shared client, BullMQ queues and workers) spreads this object
+      ...(cfg.redisTls && { tls: {} }),
     };
   },
   get jwt() {
@@ -244,12 +348,21 @@ export const config = {
       maxChunksPerQuery: cfg.maxChunksPerQuery,
       embeddingDimensions: cfg.embeddingDimensions,
       minSimilarityThreshold: cfg.minSimilarityThreshold,
-      useStructuredOutput: cfg.useStructuredOutput,
+      promptVersionChat: cfg.promptVersionChat,
+      promptVersionExtract: cfg.promptVersionExtract,
+      maxQuestionChars: cfg.maxQuestionChars,
+      injectionDetection: cfg.injectionDetection,
+      chatHistoryTurns: cfg.chatHistoryTurns,
+      chatHistoryMaxChars: cfg.chatHistoryMaxChars,
     };
   },
   get rateLimit() {
     const cfg = getConfig();
     return {
+      enabled: cfg.rateLimitEnabled,
+      uploadMax: cfg.rateLimitUploadMax,
+      authMax: cfg.rateLimitAuthMax,
+      authWindowMs: cfg.rateLimitAuthWindowMs,
       windowMs: cfg.rateLimitWindowMs,
       maxRequests: cfg.rateLimitMaxRequests,
       chatMax: cfg.rateLimitChatMax,

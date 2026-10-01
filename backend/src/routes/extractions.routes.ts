@@ -48,31 +48,7 @@ const paginationSchema = z.object({
 
 // ===========================================
 // Extraction Routes
-// =================
-// API endpoints for structured data extraction from documents.
-//
-// Endpoints:
-// - POST /extractions - Extract structured data from a document
-// - GET /extractions/schemas - List available extraction schemas
-// - GET /extractions - List all extractions for user
-// - GET /extractions/:id - Get a specific extraction
-// - GET /extractions/document/:documentId - Get extractions for a document
-// - DELETE /extractions/:id - Delete an extraction
-
-/**
- * DELETE /extractions (bulk delete)
- * Delete all extractions for the authenticated user
- * Response: 204 No Content
- */
-router.delete('/', authMiddleware, generalLimiter, async (req: Request, res: Response) => {
-  try {
-    const userId = req.userId!;
-    await extractionService.deleteAllExtractions(userId);
-    res.status(204).send();
-  } catch (error) {
-    throw error;
-  }
-});
+// ===========================================
 
 router.post('/', authMiddleware, extractLimiter, async (req: Request, res: Response) => {
   try {

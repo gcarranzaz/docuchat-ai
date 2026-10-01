@@ -47,6 +47,11 @@ COPY --from=builder /app/dist ./dist
 # Copy migrations (needed for runtime)
 COPY migrations ./migrations
 
+# AWS RDS certificate authority bundle. RDS certificates are signed by an Amazon CA that Node does
+# not trust by default; with this file DB_SSL=verify (the production default) can really verify the
+# server instead of failing or being switched off. Point DB_SSL_CA_FILE at it.
+ADD https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /app/certs/rds-global-bundle.pem
+
 # Set ownership
 RUN chown -R nodejs:nodejs /app
 

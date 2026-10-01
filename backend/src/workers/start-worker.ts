@@ -13,12 +13,18 @@
 
 import { logger } from '../utils/logger.js';
 import { getPool, checkDatabaseHealth } from '../config/database.js';
+import { initProviders } from '../ai/providers/providerFactory.js';
 import './embeddings.worker.js'; // Import starts the worker
+import './maintenance.worker.js'; // Import starts the retention worker
+import { scheduleRetention } from '../queues/maintenance.queue.js';
 
 async function main(): Promise<void> {
   logger.info('Starting embeddings worker...');
 
   try {
+    // Fail at startup (not on the first job) if the embedding provider is misconfigured
+    initProviders();
+
     // Initialize database connection pool
     getPool();
 
@@ -29,6 +35,7 @@ async function main(): Promise<void> {
     }
 
     logger.info({ latencyMs: health.latencyMs }, 'Worker connected to database');
+    await scheduleRetention();
     logger.info('✅ Embeddings worker started successfully');
     logger.info('Waiting for jobs...');
   } catch (error) {

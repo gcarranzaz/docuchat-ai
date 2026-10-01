@@ -11,7 +11,7 @@
  */
 
 import { query } from '../config/database.js';
-import { calculateCost } from '../ai/providers/llmProvider.interface.js';
+import { calculateCost } from '../ai/pricing.js';
 import type { UsageLog } from '../types/index.js';
 
 // ===========================================

@@ -1,229 +1,125 @@
 /**
  * Rate Limiting Middleware
  * ========================
- * Protects endpoints from abuse and API cost overruns
+ * Protects endpoints from abuse and runaway AI cost.
  *
- * Strategy:
- * - General API limit: 20 req/min (adjustable)
- * - Chat endpoint: 10 req/min (LLM calls are expensive)
- * - Extraction endpoint: 5 req/min (LLM calls + processing intensive)
- * - Per-user limits (not IP-based for authenticated endpoints)
+ * - Counters live in Redis, so the limits hold across several API tasks. In-memory
+ *   counters would give each task its own allowance (N tasks = N times the limit).
+ * - Authenticated requests are limited per user; anonymous ones (login, register)
+ *   per IP. Behind a load balancer set TRUST_PROXY, or every client shares one IP.
+ * - If Redis is unavailable the limiter fails OPEN (the request is served and the
+ *   error is logged): losing rate limiting briefly is better than taking the API
+ *   down. The per-user budget (budget.service.ts) is the hard spend cap and lives
+ *   in Postgres, so cost stays bounded in that case.
+ * - Disable everything with RATE_LIMIT_ENABLED=false (local tests).
  *
- * Production considerations:
- * - Use Redis for distributed rate limiting (multiple server instances)
- * - Implement sliding window for smoother limit enforcement
- * - Add burst allowance for legitimate spikes
- * - Different limits for different user tiers (free vs paid)
+ * Layers: this file limits request RATE; budget.service.ts limits SPEND.
  */
 
-import rateLimit from 'express-rate-limit';
-import { config } from '../config/index.js';
-import { logger } from '../utils/logger.js';
+import rateLimit, { type Options } from 'express-rate-limit';
 import type { Request, Response } from 'express';
+import { config } from '../config/index.js';
+import { RedisRateLimitStore } from './redisRateLimitStore.js';
+import { logger } from '../utils/logger.js';
 
-// ===========================================
-// Rate Limit Configuration
-// ===========================================
+const settings = config.rateLimit;
 
-const rateLimitConfig = config.rateLimit;
-
-/**
- * Custom key generator: rate limit by user ID for authenticated endpoints
- */
-function keyGenerator(req: Request): string {
-  // If authenticated, use userId
-  if (req.user?.id) {
-    return `user:${req.user.id}`;
-  }
-
-  // Otherwise use IP address
+function userOrIp(req: Request): string {
+  if (req.userId) return `user:${req.userId}`;
   return req.ip || req.socket.remoteAddress || 'unknown';
 }
 
-/**
- * Custom handler when rate limit is exceeded
- */
-function handler(req: Request, res: Response): void {
-  const identifier = keyGenerator(req);
-
-  logger.warn(
-    {
-      identifier,
-      path: req.path,
-      method: req.method,
-    },
-    'Rate limit exceeded'
-  );
-
-  res.status(429).json({
-    error: 'Too Many Requests',
-    message: 'You have exceeded the rate limit. Please try again later.',
-    retryAfter: res.getHeader('Retry-After'),
-  });
+function ipOnly(req: Request): string {
+  return req.ip || req.socket.remoteAddress || 'unknown';
 }
 
-/**
- * Skip rate limiting in test environment
- */
-function skip(req: Request): boolean {
-  return config.server.nodeEnv === 'test';
+function tooMany(message: string) {
+  return (req: Request, res: Response): void => {
+    logger.warn({ identifier: userOrIp(req), path: req.path, method: req.method }, 'Rate limit exceeded');
+    res.status(429).json({
+      error: {
+        code: 'RATE_LIMIT_EXCEEDED',
+        message,
+        retryAfter: res.getHeader('Retry-After'),
+      },
+    });
+  };
+}
+
+interface LimiterSpec {
+  name: string;
+  windowMs: number;
+  max: number;
+  message: string;
+  key?: (req: Request) => string;
+}
+
+function makeLimiter(spec: LimiterSpec) {
+  const options: Partial<Options> = {
+    windowMs: spec.windowMs,
+    limit: spec.max,
+    standardHeaders: true, // RateLimit-* and Retry-After
+    legacyHeaders: false,
+    keyGenerator: spec.key ?? userOrIp,
+    handler: tooMany(spec.message),
+    skip: () => !settings.enabled,
+    passOnStoreError: true, // fail open, see the note at the top
+    store: new RedisRateLimitStore(`rl:${spec.name}:`),
+  };
+  return rateLimit(options);
 }
 
 // ===========================================
 // Rate Limiters
 // ===========================================
 
-/**
- * General API rate limiter
- * Applied to most endpoints
- */
-export const generalLimiter = rateLimit({
-  windowMs: rateLimitConfig.windowMs,
-  max: rateLimitConfig.maxRequests,
-  message: 'Too many requests from this account, please try again later.',
-  standardHeaders: true, // Return rate limit info in `RateLimit-*` headers
-  legacyHeaders: false, // Disable `X-RateLimit-*` headers
-  keyGenerator,
-  handler,
-  skip,
+/** General API limiter, applied to most endpoints */
+export const generalLimiter = makeLimiter({
+  name: 'general',
+  windowMs: settings.windowMs,
+  max: settings.maxRequests,
+  message: 'Too many requests. Please try again later.',
 });
 
-/**
- * Strict rate limiter for auth endpoints
- * Prevents brute force attacks
- */
-export const authLimiter = rateLimit({
-  windowMs: 1 * 60 * 1000, // 1 minute (dev-friendly)
-  max: 100, // 100 requests per window (dev-friendly)
-  message: 'Too many authentication attempts, please try again later.',
-  standardHeaders: true,
-  legacyHeaders: false,
-  keyGenerator: (req) => {
-    // For auth, always use IP (no user yet)
-    return req.ip || req.socket.remoteAddress || 'unknown';
-  },
-  handler: (req, res) => {
-    logger.warn(
-      {
-        ip: req.ip,
-        path: req.path,
-      },
-      'Auth rate limit exceeded - possible brute force attack'
-    );
-
-    res.status(429).json({
-      error: 'Too Many Requests',
-      message: 'Too many authentication attempts. Please try again in 15 minutes.',
-      retryAfter: res.getHeader('Retry-After'),
-    });
-  },
-  skip,
+/** Strict limiter for login/register: slows password guessing. Always per IP (no user yet). */
+export const authLimiter = makeLimiter({
+  name: 'auth',
+  windowMs: settings.authWindowMs,
+  max: settings.authMax,
+  message: 'Too many authentication attempts. Please try again later.',
+  key: ipOnly,
 });
 
-/**
- * Rate limiter for chat endpoints
- * Stricter because LLM API calls are expensive
- */
-export const chatLimiter = rateLimit({
-  windowMs: rateLimitConfig.windowMs,
-  max: rateLimitConfig.chatMax,
-  message: 'Too many chat requests. Please wait before sending more messages.',
-  standardHeaders: true,
-  legacyHeaders: false,
-  keyGenerator,
-  handler: (req, res) => {
-    logger.warn(
-      {
-        userId: req.user?.id,
-        path: req.path,
-      },
-      'Chat rate limit exceeded'
-    );
-
-    res.status(429).json({
-      error: 'Too Many Requests',
-      message: 'You are sending messages too quickly. Please wait a moment before trying again.',
-      retryAfter: res.getHeader('Retry-After'),
-    });
-  },
-  skip,
+/** Chat: every request can cost an LLM call */
+export const chatLimiter = makeLimiter({
+  name: 'chat',
+  windowMs: settings.windowMs,
+  max: settings.chatMax,
+  message: 'You are sending messages too quickly. Please wait a moment before trying again.',
 });
 
-/**
- * Rate limiter for extraction endpoints
- * Very strict because extraction is processing-intensive
- */
-export const extractLimiter = rateLimit({
-  windowMs: rateLimitConfig.windowMs,
-  max: rateLimitConfig.extractMax,
-  message: 'Too many extraction requests. Please wait before submitting more.',
-  standardHeaders: true,
-  legacyHeaders: false,
-  keyGenerator,
-  handler: (req, res) => {
-    logger.warn(
-      {
-        userId: req.user?.id,
-        path: req.path,
-      },
-      'Extraction rate limit exceeded'
-    );
-
-    res.status(429).json({
-      error: 'Too Many Requests',
-      message: 'You are submitting extraction requests too quickly. Please wait before trying again.',
-      retryAfter: res.getHeader('Retry-After'),
-    });
-  },
-  skip,
+/** Extraction: LLM call over a whole document */
+export const extractLimiter = makeLimiter({
+  name: 'extract',
+  windowMs: settings.windowMs,
+  max: settings.extractMax,
+  message: 'You are submitting extraction requests too quickly. Please wait before trying again.',
 });
 
-/**
- * Rate limiter for document uploads
- * Moderate limit to prevent storage abuse
- */
-export const uploadLimiter = rateLimit({
-  windowMs: rateLimitConfig.windowMs,
-  max: 10, // 10 uploads per minute
-  message: 'Too many uploads. Please wait before uploading more documents.',
-  standardHeaders: true,
-  legacyHeaders: false,
-  keyGenerator,
-  handler: (req, res) => {
-    logger.warn(
-      {
-        userId: req.user?.id,
-        path: req.path,
-      },
-      'Upload rate limit exceeded'
-    );
-
-    res.status(429).json({
-      error: 'Too Many Requests',
-      message: 'You are uploading documents too quickly. Please wait before uploading more.',
-      retryAfter: res.getHeader('Retry-After'),
-    });
-  },
-  skip,
+/** Uploads: storage and embedding cost */
+export const uploadLimiter = makeLimiter({
+  name: 'upload',
+  windowMs: settings.windowMs,
+  max: settings.uploadMax,
+  message: 'You are uploading documents too quickly. Please wait before uploading more.',
 });
 
-// ===========================================
-// Helper: Create Custom Rate Limiter
-// ===========================================
-
-export function createRateLimiter(options: {
-  windowMs?: number;
-  max: number;
-  message?: string;
-}) {
-  return rateLimit({
-    windowMs: options.windowMs || rateLimitConfig.windowMs,
+/** Build a custom limiter (distinct `name` per limiter: it is the Redis key prefix) */
+export function createRateLimiter(options: { name: string; windowMs?: number; max: number; message?: string }) {
+  return makeLimiter({
+    name: options.name,
+    windowMs: options.windowMs ?? settings.windowMs,
     max: options.max,
-    message: options.message || 'Too many requests, please try again later.',
-    standardHeaders: true,
-    legacyHeaders: false,
-    keyGenerator,
-    handler,
-    skip,
+    message: options.message ?? 'Too many requests, please try again later.',
   });
 }

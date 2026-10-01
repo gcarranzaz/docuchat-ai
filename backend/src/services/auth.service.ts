@@ -27,6 +27,7 @@ import {
 } from '../utils/jwt.js';
 import { AppError, errors } from '../middleware/error.middleware.js';
 import { logger } from '../utils/logger.js';
+import * as audit from './audit.service.js';
 import type { AuthResponse, TokenResponse } from '../schemas/auth.schema.js';
 
 // ===========================================
@@ -57,6 +58,7 @@ export async function register(
   const user = await userRepo.create(email, passwordHash);
 
   logger.info({ userId: user.id }, 'User registered successfully');
+  await audit.record({ action: 'auth.register', userId: user.id, resourceType: 'user', resourceId: user.id });
 
   // Generate tokens
   const tokenPair = generateTokenPair(user.id, user.email);
@@ -97,12 +99,20 @@ export async function login(
   if (!user) {
     // Hash a dummy password to maintain constant time
     await bcrypt.hash('dummy_password', BCRYPT_ROUNDS);
+    // A pseudonym of the address, not the address: enough to see repeated attempts on one account
+    await audit.record({ action: 'auth.login_failed', outcome: 'denied', metadata: { emailRef: audit.pseudonymize(email), reason: 'unknown_email' } });
     throw errors.unauthorized('Invalid email or password');
   }
 
   // Verify password
   const isValid = await bcrypt.compare(password, user.passwordHash);
   if (!isValid) {
+    await audit.record({
+      action: 'auth.login_failed',
+      userId: user.id,
+      outcome: 'denied',
+      metadata: { emailRef: audit.pseudonymize(email), reason: 'wrong_password' },
+    });
     throw errors.unauthorized('Invalid email or password');
   }
 
@@ -124,6 +134,7 @@ export async function login(
   });
 
   logger.info({ userId: user.id }, 'User logged in successfully');
+  await audit.record({ action: 'auth.login', userId: user.id, resourceType: 'user', resourceId: user.id });
 
   return {
     user: {
@@ -176,6 +187,13 @@ export async function refreshTokens(refreshToken: string): Promise<TokenResponse
       'All refresh tokens revoked due to reuse detection'
     );
 
+    await audit.record({
+      action: 'auth.token_reuse',
+      userId: payload.userId,
+      outcome: 'denied',
+      metadata: { revokedSessions: revokedCount },
+    });
+
     throw new AppError(
       'Session compromised. Please login again.',
       401,
@@ -215,6 +233,7 @@ export async function refreshTokens(refreshToken: string): Promise<TokenResponse
   }
 
   logger.debug({ userId: user.id }, 'Tokens refreshed successfully');
+  await audit.record({ action: 'auth.refresh', userId: user.id });
 
   return {
     accessToken: newTokenPair.accessToken,
@@ -234,6 +253,7 @@ export async function logout(refreshToken: string): Promise<void> {
   if (storedToken) {
     await tokenRepo.revoke(storedToken.id);
     logger.debug({ tokenId: storedToken.id }, 'Token revoked on logout');
+    await audit.record({ action: 'auth.logout', userId: storedToken.userId });
   }
 }
 
@@ -245,4 +265,30 @@ export async function revokeAllSessions(userId: string): Promise<number> {
   const revokedCount = await tokenRepo.revokeAllForUser(userId);
   logger.info({ userId, revokedCount }, 'All sessions revoked');
   return revokedCount;
+}
+
+// ===========================================
+// Delete account (right to erasure)
+// ===========================================
+
+/**
+ * Permanently delete the account and everything it owns. Requires the current password,
+ * so a stolen access token alone cannot erase an account. The audit trail keeps a record
+ * that the deletion happened (an opaque id, no personal data).
+ */
+export async function deleteAccount(userId: string, password: string): Promise<void> {
+  const user = await userRepo.findByIdWithHash(userId);
+  if (!user) {
+    throw errors.notFound('User');
+  }
+
+  const isValid = await bcrypt.compare(password, user.passwordHash);
+  if (!isValid) {
+    await audit.record({ action: 'account.delete', userId, outcome: 'denied', resourceType: 'user', resourceId: userId, metadata: { reason: 'wrong_password' } });
+    throw errors.unauthorized('Password is incorrect');
+  }
+
+  await userRepo.deleteById(userId); // cascades to all of the user's data
+  logger.info({ userId }, 'Account deleted');
+  await audit.record({ action: 'account.delete', userId, resourceType: 'user', resourceId: userId });
 }

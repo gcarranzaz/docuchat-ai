@@ -45,12 +45,7 @@ export interface EmbeddingJobResult {
 
 const QUEUE_NAME = 'embeddings';
 
-const redisConnection = {
-  host: config.redis.host,
-  port: config.redis.port,
-  password: config.redis.password,
-  db: config.redis.db,
-};
+const redisConnection = { ...config.redis };
 
 // ===========================================
 // Queue Instance

@@ -8,14 +8,14 @@ const prodSecrets = {
 
 describe('config', () => {
   it('parses "false" as false (z.coerce.boolean would return true)', () => {
-    expect(loadConfig({ USE_STRUCTURED_OUTPUT: 'false' }).useStructuredOutput).toBe(false);
-    expect(loadConfig({ USE_STRUCTURED_OUTPUT: '0' }).useStructuredOutput).toBe(false);
-    expect(loadConfig({ USE_STRUCTURED_OUTPUT: 'true' }).useStructuredOutput).toBe(true);
-    expect(loadConfig({}).useStructuredOutput).toBe(true);
+    expect(loadConfig({ INJECTION_DETECTION: 'false' }).injectionDetection).toBe(false);
+    expect(loadConfig({ INJECTION_DETECTION: '0' }).injectionDetection).toBe(false);
+    expect(loadConfig({ INJECTION_DETECTION: 'true' }).injectionDetection).toBe(true);
+    expect(loadConfig({}).injectionDetection).toBe(true);
   });
 
   it('rejects an ambiguous boolean instead of guessing', () => {
-    expect(() => loadConfig({ USE_STRUCTURED_OUTPUT: 'maybe' })).toThrow();
+    expect(() => loadConfig({ INJECTION_DETECTION: 'maybe' })).toThrow();
   });
 
   it('defaults to the mock provider so the app runs without API keys', () => {

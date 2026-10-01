@@ -14,7 +14,7 @@
  * - Reuse: if chunk content unchanged, keep existing embedding
  */
 
-import { getLlmProvider } from '../ai/providers/providerFactory.js';
+import { getEmbeddingProvider } from '../ai/providers/providerFactory.js';
 import * as chunkRepo from '../repositories/chunk.repository.js';
 import * as documentRepo from '../repositories/document.repository.js';
 import * as usageRepo from '../repositories/usage.repository.js';
@@ -47,7 +47,7 @@ export async function processDocument(
   content: string,
   title: string
 ): Promise<EmbeddingResult> {
-  const provider = getLlmProvider();
+  const provider = getEmbeddingProvider();
   const startTime = Date.now();
 
   logger.info({ documentId, contentLength: content.length }, 'Processing document for embeddings');
@@ -142,7 +142,7 @@ export async function embedQuery(
   query: string,
   userId: string
 ): Promise<{ embedding: number[]; tokenCount: number }> {
-  const provider = getLlmProvider();
+  const provider = getEmbeddingProvider();
   const startTime = Date.now();
 
   const result = await provider.embed(query);

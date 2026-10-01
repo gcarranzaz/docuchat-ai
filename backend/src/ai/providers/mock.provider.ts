@@ -15,7 +15,15 @@
  * - CI/CD pipelines
  */
 
-import type { LlmProvider, CompletionParams } from './llmProvider.interface.js';
+import type {
+  LlmProvider,
+  CompletionParams,
+  StreamHandlers,
+  ToolCall,
+  ToolCompletionParams,
+  ToolCompletionResult,
+} from './llmProvider.interface.js';
+import { StreamAbortedError } from './errors.js';
 import type { EmbeddingResult, CompletionResult } from '../../types/index.js';
 import { getConfig } from '../../config/index.js';
 import { logger } from '../../utils/logger.js';
@@ -27,10 +35,13 @@ import { logger } from '../../utils/logger.js';
 export class MockProvider implements LlmProvider {
   readonly name = 'mock';
   private embeddingDimensions: number;
+  /** Pause between streamed pieces: short by default so tests stay fast, MOCK_STREAM_DELAY_MS to slow it down */
+  private streamDelayMs: number;
 
   constructor() {
     const config = getConfig();
     this.embeddingDimensions = config.embeddingDimensions;
+    this.streamDelayMs = config.mockStreamDelayMs;
   }
 
   isConfigured(): boolean {
@@ -90,6 +101,86 @@ export class MockProvider implements LlmProvider {
     };
   }
 
+  /**
+   * Deterministic tool use, so the whole path runs with no key (spec 011).
+   * The mock asks for get_document_info when the question names a lookup ("lookup <uuid>"),
+   * or asks about the document itself (size, chunks, upload date, metadata) and the context
+   * shows a document id. After the tool result it answers from it. Text inside documents never
+   * triggers anything: only the QUESTION block is read.
+   */
+  async completeWithTools(params: ToolCompletionParams): Promise<ToolCompletionResult> {
+    const inputTokens = Math.ceil((params.systemPrompt.length + params.userPrompt.length) / 4);
+    const question = this.readBlock(params.userPrompt, 'QUESTION') ?? '';
+    const context = this.readBlock(params.userPrompt, 'CONTEXT') ?? '';
+    const lastTool = [...params.turns].reverse().find((turn) => turn.role === 'tool');
+
+    if (!lastTool && params.toolChoice === 'auto') {
+      const explicit = question.match(/lookup ([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i)?.[1];
+      const asksAboutDocument = /\b(how (big|large|long)|how many (chunks|characters)|when was|uploaded|document info|metadata)\b/i.test(question);
+      const fromContext = asksAboutDocument ? context.match(/document: ([0-9a-f-]{36})/i)?.[1] : undefined;
+      const documentId = explicit ?? fromContext;
+      if (documentId) {
+        const call: ToolCall = { id: 'mock-call-1', name: 'get_document_info', arguments: { documentId } };
+        return { content: '', toolCalls: [call], inputTokens, outputTokens: 20, model: 'mock' };
+      }
+    }
+
+    if (lastTool && lastTool.role === 'tool') {
+      const result = lastTool.results[0];
+      const payload = result ? this.readToolPayload(result.content) : undefined;
+      const answer = JSON.stringify(
+        result && !result.isError && payload
+          ? {
+              answer: `The document "${String(payload['title'])}" has ${String(payload['chunkCount'])} chunks and ${String(payload['characters'])} characters. [chunk-0]`,
+              citations: /\[chunk-0\]/.test(context) ? [0] : [],
+              confidence: 'MEDIUM',
+              reasoning: 'Mock provider: answered from the get_document_info tool result.',
+            }
+          : {
+              answer: 'I could not look up that document.',
+              citations: [],
+              confidence: 'LOW',
+              reasoning: 'The tool returned an error.',
+            }
+      );
+      return { content: answer, toolCalls: [], inputTokens, outputTokens: Math.ceil(answer.length / 4), model: 'mock' };
+    }
+
+    const content = this.generateMockResponse(params);
+    return { content, toolCalls: [], inputTokens, outputTokens: Math.ceil(content.length / 4), model: 'mock' };
+  }
+
+  /** The JSON inside a TOOL_RESULT block, or undefined */
+  private readToolPayload(wrapped: string): Record<string, unknown> | undefined {
+    const inner = this.readBlock(wrapped, 'TOOL_RESULT') ?? wrapped;
+    try {
+      const parsed: unknown = JSON.parse(inner);
+      return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * Streams the same content complete() would return, a word at a time, so the
+   * whole streaming path can be exercised with no API key.
+   */
+  async stream(params: CompletionParams, handlers: StreamHandlers): Promise<CompletionResult> {
+    const content = this.generateMockResponse(params);
+    const inputTokens = Math.ceil((params.systemPrompt.length + params.userPrompt.length) / 4);
+    const outputTokens = Math.ceil(content.length / 4);
+
+    // Words and the whitespace after them: concatenated, the pieces equal the content exactly
+    for (const piece of content.match(/\S+\s*|\s+/g) ?? []) {
+      if (handlers.signal?.aborted) throw new StreamAbortedError();
+      handlers.onToken(piece);
+      await new Promise((resolve) => setTimeout(resolve, this.streamDelayMs));
+    }
+    if (handlers.signal?.aborted) throw new StreamAbortedError();
+
+    return { content, inputTokens, outputTokens, model: 'mock' };
+  }
+
   // ===========================================
   // Mock Generation Logic
   // ===========================================
@@ -134,9 +225,14 @@ export class MockProvider implements LlmProvider {
       return this.generateMockJsonResponse(userPrompt);
     }
 
-    // Check for common patterns in prompts
-    if (userPrompt.includes('begin_context') && userPrompt.includes('end_context')) {
+    // Chat prompt (chat_rag v3): untrusted blocks are delimited with a per-request nonce
+    if (/<<<begin_context_[0-9a-f]+>>>/.test(userPrompt)) {
       return this.generateMockRagResponse(params.userPrompt);
+    }
+
+    // Document summary prompt (document_summary v1)
+    if (/<<<begin_title_[0-9a-f]+>>>/.test(userPrompt)) {
+      return this.generateMockSummaryResponse(params.userPrompt);
     }
 
     // Default response
@@ -159,19 +255,54 @@ Note: This is a mock response for testing purposes. In production, this would be
    * Generate mock RAG response with citations
    */
   private generateMockRagResponse(prompt: string): string {
-    // Extract question from prompt
-    const questionMatch = prompt.match(/User Question:\s*(.+?)(?:\n|$)/i);
-    const question = questionMatch ? questionMatch[1] : 'the query';
+    const question = this.readBlock(prompt, 'QUESTION') ?? 'the query';
+    const context = this.readBlock(prompt, 'CONTEXT') ?? '';
 
-    return `Based on the provided documents, here is my answer to "${question}":
+    // Cite the first two chunk labels that really appear in the context
+    const cited: number[] = [];
+    for (const match of context.matchAll(/\[chunk-(\d+)\]/g)) {
+      const index = Number(match[1]);
+      if (!cited.includes(index)) cited.push(index);
+      if (cited.length === 2) break;
+    }
 
-The documents contain information relevant to your question. [chunk-0] The key findings suggest that the content addresses your query directly.
+    // Always the same JSON shape, whatever the document says: the mock never obeys text in the context
+    if (cited.length === 0) {
+      return JSON.stringify({
+        answer: "I couldn't find information about this in your documents.",
+        citations: [],
+        confidence: 'LOW',
+        reasoning: 'No relevant context was provided.',
+      });
+    }
 
-Additionally, [chunk-1] there are supporting details that provide context for this answer.
+    return JSON.stringify({
+      answer: `Based on your documents, here is a (mock) answer to "${question.slice(0, 200)}": the content addresses your question. ${cited
+        .map((index) => `[chunk-${index}]`)
+        .join(' ')}`,
+      citations: cited,
+      confidence: 'MEDIUM',
+      reasoning: 'Mock provider: deterministic answer for local development and tests.',
+    });
+  }
 
-Confidence: MEDIUM
+  /**
+   * Mock document summary (document_summary v1 prompt)
+   */
+  private generateMockSummaryResponse(prompt: string): string {
+    const title = (this.readBlock(prompt, 'TITLE') ?? 'Untitled').slice(0, 100);
+    const body = (this.readBlock(prompt, 'DOCUMENT') ?? '').replace(/\s+/g, ' ').trim();
+    return JSON.stringify({
+      summary: body ? `${body.slice(0, 200)}${body.length > 200 ? '...' : ''}` : 'Empty document.',
+      keyTopics: [title],
+      documentType: 'other',
+    });
+  }
 
-This answer is based solely on the provided document context. If you need more specific information, please provide additional documents or clarify your question.`;
+  /** Text between <<<BEGIN_LABEL_nonce>>> and <<<END_LABEL_nonce>>> (first match), or null */
+  private readBlock(prompt: string, label: string): string | null {
+    const match = prompt.match(new RegExp(`<<<BEGIN_${label}_([0-9a-f]+)>>>\\n([\\s\\S]*?)\\n<<<END_${label}_\\1>>>`));
+    return match ? (match[2] as string) : null;
   }
 
   /**

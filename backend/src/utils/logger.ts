@@ -24,17 +24,29 @@
  */
 
 import { pino } from 'pino';
+import { currentRequestId } from './requestContext.js';
 
 // Determine environment
 const isDevelopment = process.env['NODE_ENV'] !== 'production';
 const logLevel = process.env['LOG_LEVEL'] || (isDevelopment ? 'debug' : 'info');
 
+// LOG_FILE writes plain JSON lines to a file, synchronously, instead of stdout/pretty output.
+// Meant for local debugging and for tests that check what the application really writes.
+const logFile = process.env['LOG_FILE'];
+const destination = logFile ? pino.destination({ dest: logFile, sync: true }) : undefined;
+
 // Create logger with appropriate transport
 export const logger = pino({
   level: logLevel,
 
+  // Every line carries the id of the request that produced it (when there is one)
+  mixin: () => {
+    const requestId = currentRequestId();
+    return requestId ? { requestId } : {};
+  },
+
   // In development, use pretty printing
-  transport: isDevelopment
+  transport: isDevelopment && !destination
     ? {
         target: 'pino-pretty',
         options: {
@@ -65,7 +77,7 @@ export const logger = pino({
     ],
     censor: '[REDACTED]',
   },
-});
+}, destination);
 
 // ===========================================
 // Typed Logger Helpers

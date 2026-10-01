@@ -4,6 +4,7 @@
 export async function deleteAllExtractions(userId: string): Promise<void> {
   await extractionRepo.deleteAllByUser(userId);
   logger.info({ userId }, 'All extractions deleted');
+  await audit.record({ action: 'extraction.delete_all', userId });
 }
 /**
  * Extraction Service
@@ -19,7 +20,10 @@ export async function deleteAllExtractions(userId: string): Promise<void> {
  * 6. Store extraction result
  */
 
-import { getLlmProvider } from '../ai/providers/providerFactory.js';
+import { getLlmProvider, chatModelName } from '../ai/providers/providerFactory.js';
+import { calculateCost } from '../ai/pricing.js';
+import { estimateTokenCount } from '../rag/chunker.js';
+import * as budget from './budget.service.js';
 import { buildExtractionPrompt } from '../ai/prompts/promptBuilder.js';
 import * as documentRepo from '../repositories/document.repository.js';
 import * as extractionRepo from '../repositories/extraction.repository.js';
@@ -27,6 +31,7 @@ import * as usageRepo from '../repositories/usage.repository.js';
 import { getExtractionSchema, listExtractionSchemas } from '../schemas/extraction.schema.js';
 import { errors } from '../middleware/error.middleware.js';
 import { logger } from '../utils/logger.js';
+import * as audit from './audit.service.js';
 import { getConfig } from '../config/index.js';
 import type { Extraction, ValidationError } from '../types/index.js';
 import { ZodError } from 'zod';
@@ -60,6 +65,9 @@ export interface SchemaInfo {
   version: string;
   description: string;
 }
+
+// Rough size of the extraction instructions, added to the input estimate used for budgeting
+const EXTRACTION_PROMPT_TOKENS = 1500;
 
 // ===========================================
 // Extraction Functions
@@ -102,13 +110,35 @@ export async function extractFromDocument(
     schemaDescription: extractionSchema.schemaDescription,
   });
 
-  // Step 4: Call LLM with JSON mode
+  // Step 4: Reserve budget, then call the LLM with JSON mode
+  // (worst case = whole document + instructions in, maximum output; corrected after the call)
+  const model = chatModelName(config);
+  const estimatedInput = estimateTokenCount(document.content) + EXTRACTION_PROMPT_TOKENS;
+  const reservation = await budget.reserve(
+    userId,
+    {
+      tokens: estimatedInput + config.maxTokensPerRequest,
+      costUsd: calculateCost(model, estimatedInput, config.maxTokensPerRequest),
+    },
+    { dailyTokens: config.userDailyTokenBudget, monthlyCostUsd: config.userMonthlyCostCapUsd }
+  );
+
   const llmProvider = getLlmProvider();
-  const llmResult = await llmProvider.complete({
-    systemPrompt: prompt.systemPrompt,
-    userPrompt: prompt.userPrompt,
-    jsonMode: true,
-    temperature: 0.1, // Low temperature for consistent extraction
+  let llmResult;
+  try {
+    llmResult = await llmProvider.complete({
+      systemPrompt: prompt.systemPrompt,
+      userPrompt: prompt.userPrompt,
+      jsonMode: true,
+      temperature: 0.1, // Low temperature for consistent extraction
+    });
+  } catch (error) {
+    await budget.release(reservation);
+    throw error;
+  }
+  await budget.settle(reservation, {
+    tokens: llmResult.inputTokens + llmResult.outputTokens,
+    costUsd: calculateCost(llmResult.model, llmResult.inputTokens, llmResult.outputTokens),
   });
 
   logger.debug(
@@ -125,7 +155,7 @@ export async function extractFromDocument(
   try {
     parsedData = JSON.parse(llmResult.content);
   } catch (error) {
-    logger.error({ error, response: llmResult.content }, 'Failed to parse JSON response');
+    logger.error({ documentId: request.documentId, responseLength: llmResult.content.length }, 'Failed to parse JSON response');
     throw errors.internal('LLM returned invalid JSON');
   }
 
@@ -201,6 +231,21 @@ export async function extractFromDocument(
     },
     'Extraction completed'
   );
+  await audit.record({
+    action: 'extraction.create',
+    userId,
+    resourceType: 'extraction',
+    resourceId: extraction.id,
+    metadata: {
+      documentId: request.documentId,
+      schemaName: extractionSchema.name,
+      model: llmResult.model,
+      promptVersion: prompt.promptVersion,
+      inputTokens: llmResult.inputTokens,
+      outputTokens: llmResult.outputTokens,
+      validationErrors: validationErrors.length,
+    },
+  });
 
   // Step 10: Return result
   return {
@@ -276,6 +321,7 @@ export async function deleteExtraction(
   }
 
   logger.info({ userId, extractionId }, 'Extraction deleted');
+  await audit.record({ action: 'extraction.delete', userId, resourceType: 'extraction', resourceId: extractionId });
 }
 
 /**

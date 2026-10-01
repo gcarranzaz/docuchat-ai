@@ -126,3 +126,24 @@ function mapRowToUser(row: UserRow): User {
     updatedAt: row.updated_at,
   };
 }
+
+/**
+ * Find a user by id including the password hash (to confirm a password before a destructive action)
+ */
+export async function findByIdWithHash(id: string): Promise<User | null> {
+  const result = await query<UserRow>(
+    `SELECT id, email, password_hash, created_at, updated_at FROM users WHERE id = $1`,
+    [id]
+  );
+  return result.rows[0] ? mapRowToUser(result.rows[0]) : null;
+}
+
+/**
+ * Delete a user. Everything they own goes with them through ON DELETE CASCADE:
+ * documents, chunks and embeddings, conversations, messages, extractions, feedback,
+ * budgets, refresh tokens and usage logs. The audit trail is deliberately NOT cascaded.
+ */
+export async function deleteById(id: string): Promise<boolean> {
+  const result = await query('DELETE FROM users WHERE id = $1', [id]);
+  return (result.rowCount ?? 0) > 0;
+}

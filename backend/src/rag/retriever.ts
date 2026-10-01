@@ -58,7 +58,7 @@ export async function retrieveChunks(
   // Lower for mock provider (0.0) in dev/test if needed via env var
   const minSimilarity = options.minSimilarity ?? config.minSimilarityThreshold;
 
-  logger.debug({ query, userId, topK, minSimilarity }, 'Starting chunk retrieval');
+  logger.debug({ queryLength: query.length, userId, topK, minSimilarity }, 'Starting chunk retrieval');
 
   // Step 1: Embed the query
   const { embedding, tokenCount } = await embedQuery(query, userId);
@@ -71,7 +71,7 @@ export async function retrieveChunks(
   });
 
   logger.debug({
-    query,
+    queryLength: query.length,
     chunksFound: chunks.length,
     topScore: chunks[0]?.score ?? 0,
   }, 'Chunks retrieved');
@@ -83,37 +83,8 @@ export async function retrieveChunks(
   };
 }
 
-/**
- * Build context string from chunks for LLM prompt
- * Includes chunk IDs for citation references
- */
-export function buildContextFromChunks(chunks: ChunkWithScore[]): string {
-  if (chunks.length === 0) {
-    return 'No relevant documents found.';
-  }
-
-  const contextParts = chunks.map((item, index) => {
-    const { chunk, score } = item;
-    return `[chunk-${index}] (relevance: ${(score * 100).toFixed(0)}%)\n${chunk.content}`;
-  });
-
-  // Wrap context in explicit markers so prompt builders or mock providers can detect it
-  return `BEGIN_CONTEXT\n${contextParts.join('\n\n---\n\n')}\nEND_CONTEXT`;
-}
-
-/**
- * Create a mapping from chunk index to chunk ID
- * Used for resolving citations in responses
- */
-export function createChunkMapping(chunks: ChunkWithScore[]): Map<string, DocChunk> {
-  const mapping = new Map<string, DocChunk>();
-
-  chunks.forEach((item, index) => {
-    mapping.set(`chunk-${index}`, item.chunk);
-  });
-
-  return mapping;
-}
+// Context formatting (buildContextFromChunks, createChunkMapping) lives in ./context.ts:
+// it is prompt construction, not retrieval, and has no database dependency.
 
 /**
  * Calculate overall relevance score for a retrieval

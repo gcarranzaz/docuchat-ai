@@ -20,7 +20,7 @@ const router = Router();
 router.get('/documents/:documentId', authMiddleware, async (req, res, next) => {
   try {
     const documentId = req.params['documentId'];
-    const userId = req.user!.id;
+    const userId = req.userId!;
 
     if (!documentId) {
       throw errors.badRequest('documentId is required');

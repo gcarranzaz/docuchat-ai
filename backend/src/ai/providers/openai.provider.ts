@@ -13,8 +13,16 @@
  */
 
 import OpenAI from 'openai';
-import type { LlmProvider, CompletionParams } from './llmProvider.interface.js';
+import type {
+  LlmProvider,
+  CompletionParams,
+  StreamHandlers,
+  ToolCall,
+  ToolCompletionParams,
+  ToolCompletionResult,
+} from './llmProvider.interface.js';
 import type { EmbeddingResult, CompletionResult } from '../../types/index.js';
+import { LlmProviderError, StreamAbortedError, isRetryableStatus, parseRetryAfter } from './errors.js';
 import { getConfig } from '../../config/index.js';
 import { logger } from '../../utils/logger.js';
 
@@ -36,6 +44,10 @@ export class OpenAIProvider implements LlmProvider {
     if (config.openaiApiKey) {
       this.client = new OpenAI({
         apiKey: config.openaiApiKey,
+        // One retry policy for every provider lives in ResilientProvider; the
+        // SDK's own retries would multiply with ours.
+        maxRetries: 0,
+        timeout: config.aiTimeoutMs,
       });
     }
   }
@@ -175,23 +187,165 @@ export class OpenAIProvider implements LlmProvider {
   }
 
   // ===========================================
+  // Tool calling
+  // ===========================================
+
+  /** One step of a tool conversation (Chat Completions `tools`); see ai/tools/toolLoop.ts */
+  async completeWithTools(params: ToolCompletionParams): Promise<ToolCompletionResult> {
+    if (!this.client) {
+      throw new Error('OpenAI client not configured. Set OPENAI_API_KEY.');
+    }
+    const config = getConfig();
+
+    const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
+      { role: 'system', content: params.systemPrompt },
+      { role: 'user', content: params.userPrompt },
+    ];
+    for (const turn of params.turns) {
+      if (turn.role === 'assistant') {
+        messages.push({
+          role: 'assistant',
+          content: turn.text || null,
+          tool_calls: turn.toolCalls.map((call) => ({
+            id: call.id,
+            type: 'function' as const,
+            function: { name: call.name, arguments: JSON.stringify(call.arguments ?? {}) },
+          })),
+        });
+      } else {
+        for (const result of turn.results) {
+          messages.push({ role: 'tool', tool_call_id: result.callId, content: result.content });
+        }
+      }
+    }
+
+    try {
+      const response = await this.client.chat.completions.create({
+        model: this.model,
+        messages,
+        max_tokens: params.maxTokens ?? config.maxTokensPerRequest,
+        temperature: params.temperature ?? 0.3,
+        tools: params.tools.map((tool) => ({
+          type: 'function' as const,
+          function: { name: tool.name, description: tool.description, parameters: tool.inputSchema },
+        })),
+        tool_choice: params.toolChoice,
+      });
+
+      const message = response.choices[0]?.message;
+      const toolCalls: ToolCall[] = (message?.tool_calls ?? []).map((call) => {
+        let args: unknown;
+        try {
+          args = JSON.parse(call.function.arguments);
+        } catch {
+          args = undefined; // reported to the model as invalid arguments by the executor
+        }
+        return { id: call.id, name: call.function.name, arguments: args };
+      });
+      const content = message?.content ?? '';
+      if (!content && toolCalls.length === 0) {
+        throw new Error('No content returned from OpenAI');
+      }
+
+      return {
+        content,
+        toolCalls,
+        inputTokens: response.usage?.prompt_tokens ?? 0,
+        outputTokens: response.usage?.completion_tokens ?? 0,
+        model: this.model,
+      };
+    } catch (error) {
+      logger.error({ err: error }, 'OpenAI tool completion failed');
+      throw this.handleError(error);
+    }
+  }
+
+  // ===========================================
+  // Streaming
+  // ===========================================
+
+  async stream(params: CompletionParams, handlers: StreamHandlers): Promise<CompletionResult> {
+    if (!this.client) {
+      throw new Error('OpenAI client not configured. Set OPENAI_API_KEY.');
+    }
+    if (handlers.signal?.aborted) throw new StreamAbortedError();
+
+    const config = getConfig();
+    let content = '';
+    let inputTokens = 0;
+    let outputTokens = 0;
+
+    try {
+      const stream = await this.client.chat.completions.create(
+        {
+          model: this.model,
+          messages: [
+            { role: 'system', content: params.systemPrompt },
+            { role: 'user', content: params.userPrompt },
+          ],
+          max_tokens: params.maxTokens ?? config.maxTokensPerRequest,
+          temperature: params.temperature ?? 0.3,
+          stream: true,
+          // The final chunk carries the token usage; without this we would not know what was billed
+          stream_options: { include_usage: true },
+          ...(params.jsonMode && { response_format: { type: 'json_object' as const } }),
+          ...(params.stopSequences && { stop: params.stopSequences }),
+        },
+        { signal: handlers.signal }
+      );
+
+      for await (const chunk of stream) {
+        const delta = chunk.choices[0]?.delta?.content;
+        if (delta) {
+          content += delta;
+          handlers.onToken(delta);
+        }
+        if (chunk.usage) {
+          inputTokens = chunk.usage.prompt_tokens;
+          outputTokens = chunk.usage.completion_tokens;
+        }
+      }
+    } catch (error) {
+      if (handlers.signal?.aborted) throw new StreamAbortedError();
+      logger.error({ err: error }, 'OpenAI stream failed');
+      throw this.handleError(error);
+    }
+
+    if (!content) {
+      throw new LlmProviderError('No content returned from OpenAI', this.name, undefined, false);
+    }
+    return { content, inputTokens, outputTokens, model: this.model };
+  }
+
+  // ===========================================
   // Error Handling
   // ===========================================
 
   private handleError(error: unknown): Error {
+    if (error instanceof LlmProviderError) {
+      return error;
+    }
+
+    // Network failures and timeouts: the request may succeed if repeated
+    if (error instanceof OpenAI.APIConnectionError) {
+      return new LlmProviderError('Could not reach OpenAI (network error or timeout)', this.name, undefined, true, { cause: error });
+    }
+
     if (error instanceof OpenAI.APIError) {
-      switch (error.status) {
-        case 401:
-          return new Error('Invalid OpenAI API key');
-        case 429:
-          return new Error('OpenAI rate limit exceeded. Please try again later.');
-        case 500:
-        case 502:
-        case 503:
-          return new Error('OpenAI service temporarily unavailable');
-        default:
-          return new Error(`OpenAI API error: ${error.message}`);
-      }
+      const status = error.status;
+      const message =
+        status === 401 || status === 403
+          ? 'OpenAI rejected the API key'
+          : status === 429
+            ? 'OpenAI rate limit exceeded'
+            : status !== undefined && status >= 500
+              ? 'OpenAI service temporarily unavailable'
+              : `OpenAI API error: ${error.message}`;
+      const retryAfterMs = parseRetryAfter(error.headers?.['retry-after']);
+      return new LlmProviderError(message, this.name, status, isRetryableStatus(status), {
+        cause: error,
+        ...(retryAfterMs !== undefined && { retryAfterMs }),
+      });
     }
 
     if (error instanceof Error) {

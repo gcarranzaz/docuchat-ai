@@ -25,6 +25,8 @@ import {
   type RegisterInput,
   type LoginInput,
   type RefreshInput,
+  deleteAccountSchema,
+  type DeleteAccountInput,
 } from '../schemas/auth.schema.js';
 import * as authService from '../services/auth.service.js';
 import { logger } from '../utils/logger.js';
@@ -151,6 +153,24 @@ router.get(
           createdAt: user.createdAt,
         },
       });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+// ===========================================
+// DELETE /auth/me - Delete the account and all its data (requires auth + password)
+// ===========================================
+router.delete(
+  '/me',
+  authMiddleware,
+  validate(deleteAccountSchema),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { password } = req.body as DeleteAccountInput;
+      await authService.deleteAccount(req.userId!, password);
+      res.status(204).end();
     } catch (error) {
       next(error);
     }

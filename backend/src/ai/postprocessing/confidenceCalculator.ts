@@ -163,3 +163,12 @@ export function getConfidenceDescription(level: ConfidenceLevel): string {
 export function shouldShowUncertaintyWarning(level: ConfidenceLevel): boolean {
   return level === 'LOW' || level === 'NONE';
 }
+
+/**
+ * An answer is "grounded" when at least one valid citation backs it and the evidence is not
+ * "none". A confident-sounding answer with no valid citation is NOT grounded. Used by the chat
+ * service and by the evaluation runner, so both apply the same rule.
+ */
+export function isGrounded(citationCount: number, level: ConfidenceLevel): boolean {
+  return citationCount > 0 && level !== 'NONE';
+}

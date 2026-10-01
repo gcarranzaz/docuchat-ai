@@ -93,3 +93,15 @@ export interface TokenResponse {
   refreshToken: string;
   expiresIn: number;
 }
+
+// ===========================================
+// Delete Account Schema
+// ===========================================
+
+export const deleteAccountSchema = z.object({
+  body: z.object({
+    password: z.string().min(1, 'Password is required'),
+  }),
+});
+
+export type DeleteAccountInput = z.infer<typeof deleteAccountSchema>['body'];

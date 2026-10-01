@@ -112,13 +112,16 @@ export async function markAsUsed(tokenId: string): Promise<boolean> {
 }
 
 /**
- * Revoke a specific token
+ * Revoke a specific token.
+ * Only active tokens are touched: the table forbids a token that is both used and
+ * revoked (chk_token_state), and a used token can no longer be exchanged anyway.
  */
 export async function revoke(tokenId: string): Promise<boolean> {
   const result = await query(
     `UPDATE refresh_tokens
      SET revoked_at = NOW()
      WHERE id = $1
+       AND used_at IS NULL
        AND revoked_at IS NULL`,
     [tokenId]
   );
@@ -127,14 +130,17 @@ export async function revoke(tokenId: string): Promise<boolean> {
 }
 
 /**
- * Revoke ALL tokens for a user
- * Used when token reuse is detected (security breach)
+ * Revoke ALL active tokens for a user
+ * Used when token reuse is detected (security breach).
+ * Already-used tokens are skipped on purpose (see revoke): they cannot be
+ * exchanged, and updating them would violate chk_token_state.
  */
 export async function revokeAllForUser(userId: string): Promise<number> {
   const result = await query(
     `UPDATE refresh_tokens
      SET revoked_at = NOW()
      WHERE user_id = $1
+       AND used_at IS NULL
        AND revoked_at IS NULL`,
     [userId]
   );

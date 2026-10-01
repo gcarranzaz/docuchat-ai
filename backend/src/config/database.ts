@@ -14,8 +14,9 @@
  * - Query parameterization handled by pg library (prevents SQL injection)
  */
 
+import fs from 'node:fs';
 import { Pool, PoolClient, QueryResult, QueryResultRow } from 'pg';
-import { getConfig, getDatabaseUrl } from './index.js';
+import { getConfig, getDatabaseUrl, type Config } from './index.js';
 import { logger } from '../utils/logger.js';
 
 // ===========================================
@@ -23,6 +24,22 @@ import { logger } from '../utils/logger.js';
 // ===========================================
 
 let pool: Pool | null = null;
+
+/**
+ * TLS settings for the Postgres connection.
+ * Production verifies the server certificate. RDS certificates are signed by an Amazon CA that is
+ * not in Node's default trust store, so the image ships the RDS CA bundle and DB_SSL_CA_FILE
+ * points at it; without that, "verify" fails closed instead of silently skipping the check.
+ */
+export function buildPgSsl(cfg: Pick<Config, 'nodeEnv' | 'dbSsl' | 'dbSslCaFile'>): false | { rejectUnauthorized: boolean; ca?: string } {
+  const mode = cfg.dbSsl === 'auto' ? (cfg.nodeEnv === 'production' ? 'verify' : 'disable') : cfg.dbSsl;
+  if (mode === 'disable') return false;
+  if (mode === 'no-verify') return { rejectUnauthorized: false };
+  return {
+    rejectUnauthorized: true,
+    ...(cfg.dbSslCaFile && { ca: fs.readFileSync(cfg.dbSslCaFile, 'utf8') }),
+  };
+}
 
 export function getPool(): Pool {
   if (!pool) {
@@ -37,8 +54,7 @@ export function getPool(): Pool {
       idleTimeoutMillis: 30000, // Close idle connections after 30s
       connectionTimeoutMillis: 5000, // Fail fast if can't connect in 5s
 
-      // SSL in production
-      ssl: config.nodeEnv === 'production' ? { rejectUnauthorized: true } : false,
+      ssl: buildPgSsl(config),
     });
 
     // Connection event handlers
@@ -164,11 +180,7 @@ export async function closePool(): Promise<void> {
   }
 }
 
-// Handle process termination
-process.on('SIGTERM', async () => {
-  await closePool();
-});
-
-process.on('SIGINT', async () => {
-  await closePool();
-});
+// No signal handlers here on purpose. This module used to close the pool on SIGTERM by itself,
+// which raced with the entry point's graceful shutdown: the pool was closed while requests were
+// still finishing ("Cannot use a pool after calling end on the pool"). Whoever owns the process
+// (index.ts, the workers) decides the order: stop accepting work, let it finish, then closePool().

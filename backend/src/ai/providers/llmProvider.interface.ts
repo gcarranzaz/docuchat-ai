@@ -44,9 +44,31 @@ export interface LlmProvider {
   complete(params: CompletionParams): Promise<CompletionResult>;
 
   /**
+   * Same as complete(), but reports the text as it is generated.
+   * Resolves with the full result (usage included) when the stream ends.
+   * Rejects with StreamAbortedError if handlers.signal aborts.
+   */
+  stream(params: CompletionParams, handlers: StreamHandlers): Promise<CompletionResult>;
+
+  /**
+   * One step of a tool-calling conversation (spec 011). Optional: a provider without it
+   * simply cannot be offered tools, and the caller falls back to complete().
+   * The model either answers (toolCalls is empty) or asks for tools to be run; running
+   * them and calling again is the job of ai/tools/toolLoop.ts, never of the provider.
+   */
+  completeWithTools?(params: ToolCompletionParams): Promise<ToolCompletionResult>;
+
+  /**
    * Check if provider is configured and ready
    */
   isConfigured(): boolean;
+}
+
+export interface StreamHandlers {
+  /** Called with each piece of generated text, in order */
+  onToken: (text: string) => void;
+  /** Abort the call, for example because the client disconnected */
+  signal?: AbortSignal;
 }
 
 // ===========================================
@@ -71,6 +93,49 @@ export interface CompletionParams {
 
   /** Optional: Stop sequences */
   stopSequences?: string[];
+}
+
+// ===========================================
+// Tool calling (read-only tools, spec 011)
+// ===========================================
+
+/** What the model is told it can call. `inputSchema` is JSON Schema. */
+export interface ToolDefinition {
+  name: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
+}
+
+/** A request from the model. `arguments` is undefined when the model sent something that is not JSON. */
+export interface ToolCall {
+  id: string;
+  name: string;
+  arguments: unknown;
+}
+
+export interface ToolResult {
+  callId: string;
+  name: string;
+  /** JSON text. Treated as untrusted data by the model. */
+  content: string;
+  isError: boolean;
+}
+
+/** Provider-neutral transcript of the tool rounds so far; each provider maps it to its own format */
+export type ToolTurn =
+  | { role: 'assistant'; text: string; toolCalls: ToolCall[] }
+  | { role: 'tool'; results: ToolResult[] };
+
+export interface ToolCompletionParams extends CompletionParams {
+  /** Always the full list: some APIs require it whenever earlier turns contain tool calls */
+  tools: ToolDefinition[];
+  /** "none" on the last round: the model must answer instead of calling a tool */
+  toolChoice: 'auto' | 'none';
+  turns: ToolTurn[];
+}
+
+export interface ToolCompletionResult extends CompletionResult {
+  toolCalls: ToolCall[];
 }
 
 // ===========================================
@@ -102,37 +167,4 @@ export interface UsageMetrics {
   estimatedCostUsd: number;
 }
 
-// ===========================================
-// Model Pricing (as of 2024)
-// ===========================================
-
-export const MODEL_PRICING: Record<string, { input: number; output: number }> = {
-  // OpenAI (per 1M tokens)
-  'gpt-4-turbo-preview': { input: 10.0, output: 30.0 },
-  'gpt-4': { input: 30.0, output: 60.0 },
-  'gpt-3.5-turbo': { input: 0.5, output: 1.5 },
-  'text-embedding-3-small': { input: 0.02, output: 0 },
-  'text-embedding-3-large': { input: 0.13, output: 0 },
-
-  // Anthropic (per 1M tokens)
-  'claude-3-opus-20240229': { input: 15.0, output: 75.0 },
-  'claude-3-sonnet-20240229': { input: 3.0, output: 15.0 },
-  'claude-3-haiku-20240307': { input: 0.25, output: 1.25 },
-
-  // Mock (free)
-  'mock': { input: 0, output: 0 },
-};
-
-/**
- * Calculate estimated cost for an operation
- */
-export function calculateCost(
-  model: string,
-  inputTokens: number,
-  outputTokens: number
-): number {
-  const pricing = MODEL_PRICING[model] || { input: 0, output: 0 };
-  const inputCost = (inputTokens / 1_000_000) * pricing.input;
-  const outputCost = (outputTokens / 1_000_000) * pricing.output;
-  return inputCost + outputCost;
-}
+// Pricing lives in ../pricing.ts (configurable; unknown models are never free).

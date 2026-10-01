@@ -60,6 +60,10 @@ export const errors = {
   tooManyRequests: (message = 'Rate limit exceeded') =>
     new AppError(message, 429, 'RATE_LIMIT_EXCEEDED'),
 
+  /** An upstream dependency (the AI model) returned something we cannot use */
+  badGateway: (message: string, code = 'BAD_GATEWAY') =>
+    new AppError(message, 502, code),
+
   internal: (message = 'Internal server error') =>
     new AppError(message, 500, 'INTERNAL_ERROR', false),
 };
