@@ -1,0 +1,36 @@
+# Throwaway dependencies for the integration tests.
+#
+#   docker compose -f docker-compose.test.yml up -d --wait
+#   cd backend && npm run test:integration
+#   docker compose -f docker-compose.test.yml down
+#
+# Non-default host ports so it never collides with a local Postgres/Redis.
+# Data lives in tmpfs: every `up` starts from an empty database.
+name: docuchat-test
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: docuchat
+      POSTGRES_PASSWORD: docuchat_test
+      POSTGRES_DB: docuchat_test
+    ports:
+      - "55432:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U docuchat -d docuchat_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "56379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 20

@@ -1,0 +1,30 @@
+Incident Postmortem: Checkout outage on 14 September (fictional)
+
+Summary
+On 14 September between 09:12 and 10:47 UTC the checkout service returned errors for 38 percent of requests. About 4,200 customers saw a failed payment page. No payments were double charged and no customer data was exposed.
+
+Impact
+Estimated lost revenue was 61,000 USD. Support received 312 tickets, of which 290 were closed within two days. The incident counted against the monthly availability target: availability for September was 99.71 percent against a target of 99.9 percent.
+
+Timeline (UTC)
+09:12 A deployment of the pricing service increased database connections per instance from 10 to 40.
+09:20 The primary database reached its connection limit. Checkout began returning errors.
+09:31 The on-call engineer was paged by the error rate alert.
+09:58 The deployment was identified as the likely cause.
+10:21 The pricing service was rolled back.
+10:47 Error rates returned to normal and the incident was closed.
+
+Root cause
+A configuration change raised the connection pool size without checking the total against the database limit of 400 connections. With 12 instances the service tried to open 480 connections. There was no alert on connection saturation, and the deployment pipeline had no check on pool sizes.
+
+What went well
+The rollback took 23 minutes once the cause was known. Customer communication went out within 40 minutes of the first alert.
+
+What went badly
+Detection took 19 minutes because the alert threshold was set to 50 percent errors. Identifying the deployment as the cause took 27 minutes because the change log did not list configuration changes.
+
+Action items
+1. Add an alert on database connection usage above 80 percent. Owner: platform team. Due: 30 September.
+2. Add a pipeline check that rejects pool sizes whose total exceeds 70 percent of the database limit. Owner: platform team. Due: 15 October.
+3. Lower the error rate alert threshold from 50 to 10 percent. Owner: on-call lead. Done.
+4. Include configuration changes in the deployment change log. Owner: release manager. Due: 7 October.

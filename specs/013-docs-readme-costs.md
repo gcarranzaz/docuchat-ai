@@ -20,9 +20,19 @@
 - **Demo:** seed script creating a demo user and two sample documents; `.http` file with curl examples.
 - Update `docs/COMPLIANCE.md` with real evidence and statuses.
 
+## Result
+
+- `README.md` rewritten in the order above. It leads with provenance (what the earlier prototype already had, what was added, and the defects found in it), then the quick start, decisions, AI choices, uncertainty handling, security and cost, data and evaluation, infrastructure, an explicit limitations section and next steps, and a brief-to-evidence table.
+- `docs/ARCHITECTURE.md` (Mermaid flows for ingestion and for a streamed answer), `docs/COSTS.md` (tokens per request, three model tiers, 1k/10k/100k, infrastructure, levers, what is left out), `docs/adr/0001..0005`.
+- Demo: `samples/` (handbook, incident postmortem, a document with a deliberate injection), `npm run seed:demo` (idempotent, through the public API), `docs/api-examples.http`.
+- Making the quick start true required fixing the full-stack compose, which had never worked: no migration step (new one-off `migrate` service the API and worker wait for), worker rejected by config validation (missing JWT settings), API using TLS to a Postgres that has none (`DB_SSL=disable` locally), frontend container crashing as non-root (nginx pid file) and failing its own health check (IPv6 `localhost`), nginx buffering streamed answers and limiting uploads to 1 MB, worker marked unhealthy by the API's health probe, and host port conflicts (now `POSTGRES_PORT` and `REDIS_HOST_PORT`). Verified: all services healthy, seed completes, a streamed answer arrives through the nginx proxy.
+- `docs/COMPLIANCE.md` rewritten with real evidence, per-row limits and a "not verified" list.
+
+**Honest limits.** The AWS figures in `COSTS.md` are order-of-magnitude, from memory, and not checked against the AWS calculator; model prices in the tables are illustrative inputs. Reading time of the README was not measured; the quick-start steps were executed as written.
+
 ## Acceptance criteria
-- [ ] A new reader can run the app and complete the upload → ask → see citations flow in under 5 minutes following only the README.
-- [ ] Every bullet of the brief's Deliverables section is answered in the README or linked doc.
-- [ ] `docs/COSTS.md` shows 1k/10k/100k with stated assumptions.
-- [ ] No statement in the README is untrue about the current code (checked against `COMPLIANCE.md`).
-- [ ] The earlier prototype is credited in the provenance table.
+- [x] A new reader can run the app and complete the upload, ask, citations flow following only the README (steps executed: compose up, seed, sign in, ask).
+- [x] Every bullet of the brief's Deliverables section is answered in the README or a linked document.
+- [x] `docs/COSTS.md` shows 1k/10k/100k with stated assumptions.
+- [x] Statements in the README were checked against the code while writing (limits and unverified parts are listed rather than implied).
+- [x] The earlier prototype is credited in the provenance table.

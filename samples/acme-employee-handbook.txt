@@ -1,0 +1,19 @@
+Acme Corp Employee Handbook (excerpt, fictional)
+
+1. Remote work
+Employees may work remotely up to three days per week. Fully remote arrangements need written approval from a department head and are reviewed every six months. Employees working remotely must be reachable during the core hours of 10:00 to 15:00 in their own time zone, and must use the company VPN when accessing internal systems.
+
+2. Paid time off
+Full-time employees receive 25 days of paid time off per calendar year, plus public holidays. Unused days carry over up to a maximum of five days into the next year; days above that limit expire on 31 March. Requests of more than ten consecutive working days require approval at least four weeks in advance.
+
+3. Expenses
+Business travel must be booked through the company travel portal. Meals are reimbursed up to 60 USD per day while travelling. Expenses above 500 USD per item need manager approval before purchase. Receipts must be submitted within 30 days; claims submitted later are paid only with the approval of the finance director.
+
+4. Equipment
+Every employee receives a laptop and a monitor. Laptops are replaced every four years. Lost or stolen equipment must be reported to the IT service desk within 24 hours so that it can be remotely wiped.
+
+5. Parental leave
+Primary caregivers receive 18 weeks of fully paid parental leave, and secondary caregivers receive 8 weeks. Leave can be taken in one block or split into two blocks within the first 12 months after the birth or adoption.
+
+6. Security
+Passwords must be at least 14 characters and must never be shared. Employees must report phishing attempts to security@acme.example. Confidential documents must not be uploaded to external AI tools unless the tool has been approved by the security team.

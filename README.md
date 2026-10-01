@@ -1,352 +1,183 @@
-# DocuChat - AI-Powered Document Q&A
+# DocuChat: AI document Q&A, built for production questions
 
-RAG-based document assistant that allows users to upload documents (text/PDF) and ask questions with AI-generated answers, citations, and confidence scoring.
+Upload documents, ask questions, get answers that cite the passages they come from, with a confidence level the interface does not hide. A second feature extracts structured data (invoices, resumes, contracts) as validated JSON.
 
-**Stack:** TypeScript, Node.js, Express, React, PostgreSQL (pgvector), Redis, OpenAI API
+**Stack:** TypeScript, Node 20, Express, PostgreSQL 16 with pgvector, Redis and BullMQ, React 18 with Vite and Tailwind, Docker, Terraform (AWS).
 
----
+This repository is my submission for the *Full Stack AI Engineer* assessment. The brief rewards judgment over completeness, so this README says what I chose, what I left out and what I would do next. Every claim here has a pointer to code, a test or a document; the table at the end maps the brief to evidence, including the parts that are only partly done.
 
-## Quick Start
+## Where this comes from (read this first)
 
-### Prerequisites
-- Node.js 20+
-- Docker & Docker Compose
-- OpenAI API key (optional - can use mock provider)
+The project **starts from an earlier personal prototype of mine**, [`fullstack-ai-rag-docuchat`](https://github.com/gcarranzaz/fullstack-ai-rag-docuchat). I used it as the base on purpose, so the time went into production concerns instead of scaffolding. What existed and what I added for this assessment:
 
-### Setup & Run Locally
+| Already in the prototype | Added or fixed for this assessment |
+|---|---|
+| Upload (text, PDF), chunking, pgvector HNSW search, BullMQ embedding worker | Tests: unit, integration (real Postgres and Redis) and a CI pipeline. The prototype had none |
+| JWT auth with refresh-token rotation and reuse detection | Verified by tests; a crash in reuse detection fixed |
+| OpenAI and mock providers, prompt builder v1/v2, citation parser, confidence score | Anthropic provider, retry/backoff, fallback, streaming (SSE), prompt registry with immutable versions, schema-validated output with one repair, PII masking option |
+| Extraction feature (invoice, resume, contract) | Prompt and output hardening shared with chat |
+| React app: login, documents, chat, history | Streaming states, citations, uncertainty warnings, regenerate, thumbs up/down |
+| Docker files and a Terraform draft | Terraform rewritten (no secret as an input), compose that actually runs the full stack, secrets check in CI |
+| | Cost control (atomic per-user budget, Redis rate limits, answer cache), tenant isolation tests, audit log, retention, account erasure, evaluation set and regression check, optional read-only tool calling |
 
-```bash
-# 1. Clone and install
-git clone <repo-url>
-cd fullstack-ai-rag-docuchat
+Things the prototype did not do that I found while testing it: it did not compile (TypeScript errors in backend and frontend), the backend Docker image could not be built (`.dockerignore` excluded the lockfile), one route let any user read another user's embedding-job status, async route errors left requests hanging, and `docker compose --profile full` never ran migrations. All are fixed and have tests or a verified run.
 
-# Install dependencies
-cd backend && npm install
-cd ../frontend && npm install
+## Quick start (2 minutes, no API keys)
 
-# 2. Start infrastructure (PostgreSQL + Redis)
-docker-compose up postgres redis -d
-
-# 3. Configure environment
-cd backend
-cp .env.example .env
-# Edit .env:
-#   - Set AI_PROVIDER=mock (or openai with your API key)
-#   - JWT secrets will use defaults for local dev
-
-# 4. Run database migrations
-npm run migrate
-
-# 5. Start services (3 terminals)
-# Terminal 1 - API server
-cd backend && npm run dev
-
-# Terminal 2 - Background worker
-cd backend && npm run dev:worker
-
-# Terminal 3 - Frontend
-cd frontend && npm run dev
-
-# 6. Access application
-# Open http://localhost:5173
-# Register a new account or use test credentials if seeded
-```
-
-### Docker Option
+Prerequisites: Docker with Compose, and Node 20+ for the demo seed.
 
 ```bash
-# Run everything with Docker
-docker-compose up -d
+# 1. Start everything with the mock AI provider (no keys needed)
+docker compose --profile full up -d --build
+#    If port 5432 or 6379 is taken on your machine:
+#    POSTGRES_PORT=55432 REDIS_HOST_PORT=56379 docker compose --profile full up -d --build
 
-# Access at http://localhost:5173
+# 2. Create a demo user and upload three sample documents
+cd backend && npm ci && npm run seed:demo
+
+# 3. Open http://localhost:5173 and sign in with demo@example.com / DemoPassw0rd
 ```
 
----
+Try: *"How many days of remote work are allowed?"*, *"What caused the checkout outage?"*, or ask about `poisoned document` to watch it ignore the instructions hidden inside.
 
-## Architecture Decisions
+**About the mock provider.** It makes the stack run with no keys and no cost, and the tests and CI depend on it. Its embeddings are hash-based, not semantic, so retrieval picks arbitrary chunks and answers show a LOW confidence warning. That is the UI doing its job, not a bug: **to judge answer quality, use a real provider.**
 
-### System Design
+### With a real provider
 
-```
-Client (React)
-    ↓ REST API
-API Server (Express)
-    ↓
-├─> PostgreSQL (pgvector) - Documents, chunks, embeddings
-├─> Redis (BullMQ) - Async job queue for embeddings
-└─> OpenAI API - LLM completions + embeddings
-    ↓
-Workers - Background embedding generation
-```
-
-### Key Architectural Choices
-
-**1. Async Embedding Generation**
-- Using BullMQ job queue with Redis instead of synchronous processing
-- Prevents HTTP timeouts, uploads return in <500ms, workers scale horizontally
-
-**2. Vector Database**
-- PostgreSQL with pgvector extension instead of dedicated vector DBs (Pinecone, Weaviate)
-- Simpler stack, lower cost, no vendor lock-in, handles <10M vectors fine
-
-**3. RAG Pipeline**
-```
-Sanitize input → Get/create session → Store user message
-→ Embed query → Vector search (top-5 chunks) → Build context
-→ LLM call → Parse citations → Calculate confidence
-→ Store response → Return to user
-```
-
-**4. Data Storage**
-- Store full document text, chunks with embeddings, chat history, usage logs
-- User data retained until deletion, logs for 90 days
-- RDS encryption at rest, bcrypt password hashing, no PII in logs
-
-**5. Prompt Engineering**
-- Centralized in `backend/src/ai/prompts/promptBuilder.ts` with versioning (v1 text, v2 JSON)
-- Defense against injection: input sanitization, context delimiters, explicit safety instructions
-
-**6. Provider Abstraction**
-- `LlmProvider` interface with OpenAI and Mock implementations
-- Easy to swap providers or test without API costs
-
-**7. Authentication**
-- JWT with refresh token rotation instead of session-based
-- Stateless approach works better for SPA and horizontal scaling
-
----
-
-## AI Design Choices
-
-### 1. Chunking Strategy
-- **Size:** 1000 characters with 200-char overlap (20%)
-- **Algorithm:** Break at paragraphs → sentences → hard limit
-- **Trade-off:** Fixed size (predictable tokens) vs semantic coherence
-- **Future:** Semantic chunking with LangChain
-
-### 2. Embeddings
-- **Model:** OpenAI `text-embedding-3-small` (1536 dimensions)
-- **Cost:** $0.02 per 1M tokens (~$0.00004 per document)
-- **Why not large:** 2x cost for marginal quality gain
-
-### 3. Vector Search
-- **Index:** HNSW (Hierarchical Navigable Small World)
-- **Parameters:** m=16, ef_construction=64
-- **Similarity:** Cosine distance, threshold 0.6
-- **Performance:** <50ms queries, 98%+ recall
-
-### 4. Confidence Scoring
-Multi-factor formula:
-```
-Score = 0.5 × Retrieval + 0.3 × LLM + 0.2 × Citations
-
-Levels:
-- HIGH (≥0.8): Direct answer found
-- MEDIUM (0.5-0.8): Inferred from context
-- LOW (0.3-0.5): Limited evidence
-- NONE (<0.3): Cannot answer
-```
-
-### 5. Prompt Engineering
-**Structured JSON Output:**
-- LLM returns JSON with answer, citations array, confidence level, and reasoning
-- Eliminates regex parsing, more reliable than text-based extraction
-
-**Safety Measures:**
-- Input sanitization and context delimiters (BEGIN_CONTEXT/END_CONTEXT)
-- Explicit instructions to treat user content as data only
-- Defense-in-depth approach, not foolproof but reduces risk
-
-### 6. Rate Limiting & Cost Control
-
-| Endpoint | Limit | Purpose |
-|----------|-------|---------|
-| Auth | 5/15min | Brute force prevention |
-| Upload | 10/min | Storage abuse prevention |
-| Chat | 10/min | API cost control |
-
-Cost controls: configurable top-K chunks (default 5), similarity threshold filtering, usage logging with token counts, mock provider for local dev.
-
-### 7. Quality Measurement
-- **Metrics:** Answer correctness, citation precision/recall, confidence calibration
-- **Regression Detection:** Prompt versioning, golden test dataset
-- **Production Monitoring:** User feedback, confidence score distribution, error rates
-- **Wrong Answers:** Confidence levels guide trust, citations enable verification
-
----
-
-## Trade-offs & Limitations
-
-### Current Limitations
-
-1. **Fixed-Size Chunking**
-   - May split related content awkwardly
-   - Future: Semantic chunking based on topic boundaries
-
-2. **Mock Provider Embeddings**
-   - Hash-based (not semantic)
-   - Only for testing, not production
-
-3. **Prompt Injection**
-   - Multi-layer defense but not 100% secure
-   - Inherent limitation of LLMs, requires monitoring
-
-4. **Token Estimation**
-   - Approximation (4 chars/token) not exact
-   - Could undercount for specialized text
-
-5. **Single Region**
-   - Deployed to one AWS region
-   - Multi-region for global users would add latency optimization
-
-### Architectural Trade-offs
-
-| Decision | Pros | Cons | Mitigation |
-|----------|------|------|------------|
-| **Async embeddings** | No upload timeout, scalable | Slight delay before chat | Job status endpoint |
-| **pgvector** | Simple stack, low cost | Scales to ~10M vectors | Sufficient for most cases |
-| **Fixed chunking** | Predictable tokens | May split poorly | 20% overlap helps |
-| **JWT auth** | Stateless, scalable | Tokens in localStorage | Use httpOnly cookies in prod |
-| **Structured JSON** | Reliable parsing | Larger prompts | Worth the tradeoff |
-
-### Scaling Considerations
-
-**Main bottleneck:** LLM API costs (dominates at scale)
-
-**Cost optimizations:**
-- Response caching for common queries
-- Use GPT-3.5 for simpler questions
-- Optimize prompts to reduce token usage
-
-**Infrastructure scaling:**
-- API servers scale on CPU load
-- Workers scale based on queue depth
-- Database uses vertical scaling + read replicas
-
----
-
-## Security
-
-### Authentication
-- JWT access tokens (15min) + refresh tokens (7 days)
-- Refresh token rotation with reuse detection
-- Bcrypt password hashing (cost factor 12)
-
-### Authorization
-- Tenant isolation: All queries filter by `userId`
-- Database-level enforcement prevents cross-user data access
-
-### Input Validation
-- Zod schema validation on all endpoints
-- Parameterized SQL queries (pg library)
-- File upload: MIME type whitelist, 50MB limit
-- Prompt sanitization before LLM
-
-### Production Notes
-For production: move secrets to AWS Secrets Manager, enable RDS encryption, add CSRF protection, consider WAF for DDoS, and use httpOnly cookies instead of localStorage for JWT tokens.
-
----
-
-## Testing
+Create a `.env` next to `docker-compose.yml` (it is git-ignored):
 
 ```bash
-# Backend tests
-cd backend && npm test
-
-# Frontend tests
-cd frontend && npm test
+AI_PROVIDER=anthropic            # or openai
+ANTHROPIC_API_KEY=...
+OPENAI_API_KEY=...               # needed for embeddings: Anthropic has no embeddings API
+MIN_SIMILARITY_THRESHOLD=0.6     # the 0.0 default is only for mock embeddings
 ```
 
-**Test coverage:**
-- Unit: Chunking, citation parsing, confidence calculation
-- Integration: RAG pipeline, auth flow, tenant isolation
-- E2E: Upload → Query → Response flow
+then `docker compose --profile full up -d`. Settings are documented in `backend/.env.example`. Other useful switches: `AI_FALLBACK_PROVIDER`, `REDACT_PII_BEFORE_LLM`, `TOOLS_ENABLED`.
 
----
-
-## Deployment
-
-### AWS (Terraform)
+### Local development without containers for the app
 
 ```bash
-cd infra/terraform
-terraform init
-terraform apply
+docker compose up -d postgres redis
+cd backend && cp .env.example .env && npm ci && npm run migrate
+npm run dev            # API on :3001
+npm run dev:worker     # embeddings worker (second terminal)
+cd ../frontend && npm ci && npm run dev    # :5173 (third terminal)
 ```
 
-**Infrastructure:**
-- VPC with public/private subnets
-- ECS Fargate (API + workers)
-- RDS PostgreSQL with pgvector
-- ElastiCache Redis
-- ALB with HTTPS
-- Secrets Manager
-- CloudWatch monitoring
+### Tests
 
-**Environment variables:**
-- `DATABASE_URL`: RDS connection
-- `REDIS_HOST`: ElastiCache endpoint
-- `JWT_SECRET`: From Secrets Manager
-- `OPENAI_API_KEY`: From Secrets Manager
-- `AI_PROVIDER`: openai | mock
-
----
-
-## API Documentation
-
-### Authentication
 ```bash
-POST /auth/register
-POST /auth/login
-POST /auth/refresh
-GET /auth/me
+cd backend && npm run typecheck && npm test            # unit tests, no services needed
+docker compose -f docker-compose.test.yml up -d        # Postgres and Redis on ports 55432 and 56379
+cd backend && npm run test:integration                 # real database and Redis, mock AI
+npm run eval                                           # golden set (see docs/EVALUATION.md)
+cd ../frontend && npm test && npm run build
 ```
 
-### Documents
-```bash
-POST /documents           # Upload text
-POST /documents/upload    # Upload PDF
-GET /documents
-GET /documents/:id
-DELETE /documents/:id
+API examples for the VS Code REST Client are in [docs/api-examples.http](docs/api-examples.http).
+
+## What I built and what I simplified
+
+**Use case:** questions over the user's own documents, with citations. It is concrete enough to have real failure modes (wrong answers, fabricated sources, injected instructions, cost) and small enough to do properly in the time.
+
+**Simplified on purpose**
+- A tenant is a user. No organizations, roles or sharing.
+- Text and PDF only; no OCR, no scanned documents, no images.
+- One region, one database instance, no CDN or WAF.
+- bcrypt stays (no argon2 migration), Express stays, REST stays. Nothing in the brief needed them changed.
+
+## Architecture decisions
+
+Diagrams and component responsibilities: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Decision records: [docs/adr/](docs/adr/).
+
+```
+React app ──REST/SSE──► API (Express) ──► PostgreSQL + pgvector   users, documents, chunks, vectors, usage, audit
+                              │      └──► Redis                    rate limits, answer cache, job queue
+                              └──► LLM providers (OpenAI, Anthropic, Mock)
+Worker (BullMQ) ──► chunk, embed, store     │     retention job (daily)
 ```
 
-### Chat (RAG)
-```bash
-POST /chat
-{
-  "question": "What is the refund policy?",
-  "sessionId": "uuid",     # optional
-  "documentIds": ["uuid"]  # optional filter
-}
+| Decision | Why | Cost of the choice |
+|---|---|---|
+| pgvector inside PostgreSQL ([ADR 1](docs/adr/0001-pgvector-for-vector-search.md)) | One store to secure, back up and erase from; tenant filter in the same SQL | Search shares CPU with the database; revisit past low millions of chunks |
+| Embeddings on a worker queue ([ADR 3](docs/adr/0003-bullmq-for-background-work.md)) | Uploads return fast; embedding scales separately | Redis durability is not SQS durability |
+| ECS Fargate ([ADR 2](docs/adr/0002-ecs-fargate.md)) | Long-lived streams, steady worker, no cluster to run | Less portable than Kubernetes |
+| One provider interface with decorators ([ADR 4](docs/adr/0004-provider-abstraction-and-decorators.md)) | Switching provider is configuration; retries, fallback and PII masking in one place each | A hand-written Anthropic client is code to maintain |
+| JWT access token (15 min) and rotating refresh token | Stateless API for horizontal scaling; reuse of a refresh token revokes the family | The refresh token travels in the response body and lives in browser storage, which an XSS bug could read. Production should use httpOnly cookies |
 
-Response:
-{
-  "answer": "The refund policy is 30 days [chunk-0]...",
-  "citations": [{ "chunkId": "...", "text": "...", "relevance": 0.95 }],
-  "confidence": { "score": 0.87, "level": "HIGH", ... }
-}
-```
+## AI design choices
 
-### Jobs
-```bash
-GET /jobs/documents/:documentId  # Check embedding job status
-```
+**Prompt, invocation and post-processing are separate** (brief 1.2). Prompt construction (`ai/prompts/`) is a pure function over versioned, immutable templates. Invocation (`ai/providers/`) is behind one interface, with retry, fallback and PII masking as wrappers. Post-processing (`ai/postprocessing/`) is pure and schema-validated. `ai/pipeline/chatPipeline.ts` only wires them; the eval runner and the tests use it directly.
 
----
+- **Switching providers:** `AI_PROVIDER` and `AI_FALLBACK_PROVIDER`. Completions fall back after retries on 429, 5xx and timeouts; embeddings never fall back (vectors from different models cannot share an index). After the first streamed token there is no retry or fallback.
+- **Prompt versioning:** `PROMPT_VERSION_CHAT` and `PROMPT_VERSION_EXTRACT` pick a version from the registry; an unknown version fails at startup. Every stored answer records its `prompt_version` and `model`, so a bad answer can be traced. A released template is never edited, only superseded.
+- **Structured output you can trust:** the model must return JSON; it is validated, repaired once if broken, and otherwise fails with a typed 502. Raw model text never reaches the user. Citations the model invents are dropped and counted ([ADR 5](docs/adr/0005-schema-validated-output-and-grounding.md)).
+- **Retrieval:** 1,000-character chunks with 200 overlap, `text-embedding-3-small` (1536 dimensions), HNSW index with cosine distance, top 5 chunks above a similarity threshold. If nothing is relevant the model is not called at all (no cost, no invented answer).
+- **Confidence and grounding:** a score combines retrieval similarity, the model's own claim and citation support, mapped to HIGH, MEDIUM, LOW, NONE. Whether an answer is `grounded` is decided by a rule over citations and level, not by the model. It is a heuristic, not a calibrated probability; the eval set tracks how well it separates right from wrong.
+- **Streaming:** answers stream over Server-Sent Events. What streams is a draft; the final `result` event carries the validated answer and the UI replaces the draft. Closing the page aborts the provider call and charges an estimate for what was generated.
+- **Tool calling (optional, off by default):** `TOOLS_ENABLED=true` lets the model call one **read-only** tool, `get_document_info`. The user id comes from the server and never from the model's arguments, arguments are validated, the loop is bounded to two rounds, every call is audited, and a foreign document is indistinguishable from a missing one. Tools with side effects are excluded on purpose: a steered model should only be able to write a wrong sentence, not take an action. It is not offered on the streaming endpoint. Details: [docs/SECURITY.md](docs/SECURITY.md).
 
-## Technologies
+## What the interface does about AI uncertainty (brief 1.3)
 
-- **Backend:** Node.js 20, TypeScript, Express, BullMQ
-- **Frontend:** React 18, TypeScript, Vite, TailwindCSS
-- **Database:** PostgreSQL 16 + pgvector
-- **Cache/Queue:** Redis 7
-- **AI:** OpenAI GPT-4 Turbo + text-embedding-3-small
-- **Infrastructure:** Docker, Terraform, AWS (ECS, RDS, ElastiCache)
-- **Validation:** Zod
-- **Logging:** Pino
+Streaming shows the model's status (searching your documents, then writing the answer, with a Stop button) and marks the text as a draft. When the final answer arrives: citations open to show the source passage; a LOW or NONE confidence shows a warning; an answer without valid citations is flagged as not grounded; a stopped answer says it was not verified. **Regenerate** asks again, thumbs up and down are stored with the prompt version and model (down-votes go to a review queue that grows the golden set, a manual step), and conversation history is sent as context for follow-ups.
 
----
+## Security and cost
+
+- **Prompt injection** ([docs/SECURITY.md](docs/SECURITY.md)): untrusted text (question, documents, history, tool results) goes inside per-request random delimiters that the system prompt names as data; input is normalized and length-limited; a heuristic detector flags attempts for review without blocking. This is defense in depth, not a guarantee, and the document says what it does not stop.
+- **Cost and rate limits**: Redis rate limits per user and IP; an atomic per-user daily token budget and monthly cost cap, reserved before each call and settled after; configurable prices (an unknown model is never free); an answer cache; bounded input and output. Estimate for 1k, 10k and 100k requests: [docs/COSTS.md](docs/COSTS.md).
+- **Tenant isolation:** every query is scoped by `user_id`, composite foreign keys stop cross-tenant references, foreign resources return 404, and a test fails if a route is added without isolation coverage. Mutation-checked: removing the filter makes the tests fail.
+- **Secrets:** none in the repository; in AWS they live in Secrets Manager ([docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)).
+
+## Data and evaluation
+
+- **What is stored, retention, PII, logging, audit:** [docs/AI-DATA.md](docs/AI-DATA.md). Logs carry sizes, ids and timings, never prompts, answers or documents (a test fails if content leaks). Append-only audit log. Retention job. `DELETE /auth/me` erases an account and its data. Optional masking of personal data before anything reaches a provider.
+- **Quality, regressions, wrong answers in production:** [docs/EVALUATION.md](docs/EVALUATION.md). A golden set (answerable, unanswerable, near-miss, multi-chunk, injection) with a runner and a stored baseline; changing a prompt or model means running `npm run eval` and comparing. The CI run is structural (mock provider); the quality baseline was recorded on a live model.
+
+## Infrastructure
+
+Terraform for AWS (ECS Fargate, RDS with pgvector, ElastiCache, ALB, Secrets Manager, KMS, autoscaling, alarms) in [infra/terraform](infra/terraform). **Validated, not applied:** I did not deploy it to an account. How keys are stored and rotated, how it scales under bursty usage, why Fargate rather than EKS or Lambda, and the scaling limits specific to AI workloads: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+
+## Trade-offs and known limitations
+
+- **Mock embeddings are not semantic**, so the zero-key demo shows the plumbing, not answer quality.
+- **The OpenAI path was not run against the live API.** The Anthropic path was (a smoke test and the evaluation set, both against a real model); its tool-calling path was tested only against a simulated HTTP layer.
+- **Evaluation is small.** 14 cases catch gross regressions, not subtle ones, and the confidence score is not calibrated. A larger set built from real feedback is the next step.
+- **Injection defense is layered but not complete.** A model can still follow a clever instruction and write a misleading, well-formed answer; confidence and citations are the mitigation.
+- **PII masking is pattern-based**: it misses names and addresses.
+- **The upload summary call is not counted against the per-user budget.** It is bounded by input truncation and the upload rate limit; routing it through the budget service is a known next step.
+- **Streaming shows a draft before validation**, so a user can briefly see text that is later corrected or rejected.
+- **Fixed-size chunking and vector-only retrieval.** No re-ranking, no hybrid keyword search, no semantic chunking.
+- **CI has not run on GitHub** (the workflow was checked locally, piece by piece). **Terraform has not been applied.**
+- Tokens live in browser storage; registration reveals whether an email exists (409). Both are documented trade-offs for a prototype.
+
+**What I would do next:** a larger evaluation set from thumbs-down feedback with a CI gate on the live baseline; budget accounting for the summary call; httpOnly cookies; hybrid search and re-ranking; the first real `terraform plan` and a staging deploy; JWT rotation with key ids so rotating does not sign everyone out.
+
+## How the work was organized
+
+The work followed spec-driven development: [docs/constitution.md](docs/constitution.md) holds the principles, [specs/](specs/) holds one spec per concern (each cites the line of the brief it answers, the verified starting state, and checkable criteria) and [AGENTS.md](AGENTS.md) the rules for AI-assisted sessions. I used an AI coding assistant throughout, with the specs as the contract, and I list its limits where they matter. [docs/COMPLIANCE.md](docs/COMPLIANCE.md) is the live checklist.
+
+## Brief to evidence
+
+| Brief | Where |
+|---|---|
+| 1.1 Submit content, chat with AI, structured output | Documents, chat and extractions routes; React app |
+| 1.2 REST API, AI endpoint, PostgreSQL, JWT | `backend/src/routes`, `backend/migrations`, auth tests |
+| 1.2 Prompt / invocation / post-processing separated | `ai/prompts`, `ai/providers`, `ai/postprocessing`, `ai/pipeline` |
+| 1.2 Switch providers; prompt versioning | `AI_PROVIDER`, `ai/providers/*`, `ai/prompts/registry.ts` |
+| 1.2 Prompt injection; cost and rate limits | [SECURITY.md](docs/SECURITY.md), [COSTS.md](docs/COSTS.md) |
+| 1.3 Pages, loading/error/empty states, model status, re-ask, uncertainty | `frontend/src`, [spec 004](specs/004-streaming-and-ai-aware-ux.md), [005](specs/005-refine-feedback-uncertainty.md) |
+| 2.1 Data stored, retention, PII, logging, audit | [AI-DATA.md](docs/AI-DATA.md) |
+| 2.2 Quality, regressions, wrong answers | [EVALUATION.md](docs/EVALUATION.md) |
+| 3.1 Terraform, secrets, config vs code, rotation, bursts | [infra/terraform](infra/terraform), [DEPLOYMENT.md](docs/DEPLOYMENT.md) |
+| 3.2 Docker, ECS/EKS/serverless, AI scaling limits | Dockerfiles, `docker-compose.yml`, [DEPLOYMENT.md](docs/DEPLOYMENT.md) |
+| Bonus: vector store and RAG | pgvector, `backend/src/rag` |
+| Bonus: streaming | `/chat/stream`, `frontend/src/api/chatStream.ts` |
+| Bonus: tool calling | `backend/src/ai/tools`, off by default |
+| Bonus: background processing | BullMQ worker, [ADR 3](docs/adr/0003-bullmq-for-background-work.md) |
+| Bonus: cost estimate 1k / 10k / 100k | [COSTS.md](docs/COSTS.md) |
+| Bonus: multi-tenant isolation | [spec 012](specs/012-tenant-isolation.md), `tests/integration/tenant-isolation.test.ts` |
+| Deliverables: README, decisions, trade-offs, run locally | this file |
 
 ## License
 
