@@ -34,7 +34,7 @@ Status: ✅ done and verified, 🟡 done with a limit that is stated, ⬜ not do
 - **GitHub Actions has not run.** The workflow's steps were run locally one by one (typecheck, tests, integration against containers, build, Docker builds, `terraform fmt/validate`, the secrets check). The first push is its real test.
 - **Terraform has not been applied** to an AWS account.
 - **OpenAI** (chat, embeddings, tool calling) has not been exercised against the live API.
-- **A real embedding model** was not used end to end in the browser (the zero-key demo uses mock embeddings, which are not semantic).
+- **A real embedding model** was not used end to end in the browser (the zero-key demo uses the mock provider: word-based retrieval and extractive answers, not a language model).
 
 ## Dropped on purpose
 - bcrypt → argon2 migration: no security gain worth the churn for this scope.

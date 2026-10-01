@@ -38,9 +38,9 @@ cd backend && npm ci && npm run seed:demo
 # 3. Open http://localhost:5173 and sign in with demo@example.com / DemoPassw0rd
 ```
 
-Try: *"How many days of remote work are allowed?"*, *"What caused the checkout outage?"*, or ask about `poisoned document` to watch it ignore the instructions hidden inside.
+Try: *"How many days of remote work are allowed?"*, *"What caused the checkout outage?"*, or ask about the `Poisoned Document` to watch it ignore the instructions hidden inside.
 
-**About the mock provider.** It makes the stack run with no keys and no cost, and the tests and CI depend on it. Its embeddings are hash-based, not semantic, so retrieval picks arbitrary chunks and answers show a LOW confidence warning. That is the UI doing its job, not a bug: **to judge answer quality, use a real provider.**
+**About the mock provider.** It makes the stack run with no keys and no cost, and the tests and CI depend on it. It is **not an AI model**: embeddings are built from the words of the text, so retrieval finds the passages that share terms with the question, and answers quote the closest sentences from your documents, labelled "Demo mode". That is enough to see the whole flow (upload, retrieval, citations, streaming, confidence, feedback) and to judge the interface. It cannot paraphrase, summarize or match synonyms, so **to judge answer quality, use a real provider**.
 
 ### With a real provider
 
@@ -140,7 +140,7 @@ Terraform for AWS (ECS Fargate, RDS with pgvector, ElastiCache, ALB, Secrets Man
 
 ## Trade-offs and known limitations
 
-- **Mock embeddings are not semantic**, so the zero-key demo shows the plumbing, not answer quality.
+- **The zero-key demo is not a language model.** Its retrieval is lexical (shared words, no synonyms) and its answers are extracted sentences, so it shows the plumbing and the interface, not answer quality.
 - **The OpenAI path was not run against the live API.** The Anthropic path was (a smoke test and the evaluation set, both against a real model); its tool-calling path was tested only against a simulated HTTP layer.
 - **Evaluation is small.** 14 cases catch gross regressions, not subtle ones, and the confidence score is not calibrated. A larger set built from real feedback is the next step.
 - **Injection defense is layered but not complete.** A model can still follow a clever instruction and write a misleading, well-formed answer; confidence and citations are the mitigation.

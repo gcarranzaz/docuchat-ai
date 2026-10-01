@@ -163,8 +163,8 @@ describe('the CLI exits non-zero when it should', () => {
   }
 
   const small = { version: 1, chat: [golden.chat[0]], extraction: [] };
-  // flip one expectation: demand that the answer contain a word the mock never produces
-  const flipped = { version: 1, chat: [{ ...golden.chat[0], always: { mustNotContain: ['mock'] } }], extraction: [] };
+  // flip one expectation: forbid text the mock answer always contains when it finds a passage
+  const flipped = { version: 1, chat: [{ ...golden.chat[0], always: { mustNotContain: ['demo mode'] } }], extraction: [] };
 
   it('exits 0 when every case passes', () => {
     expect(runCli(small, ['--no-baseline']).code).toBe(0);

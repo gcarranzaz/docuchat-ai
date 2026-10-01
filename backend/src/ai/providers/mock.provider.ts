@@ -26,7 +26,52 @@ import type {
 import { StreamAbortedError } from './errors.js';
 import type { EmbeddingResult, CompletionResult } from '../../types/index.js';
 import { getConfig } from '../../config/index.js';
+import { detectInjection } from '../safety/inputGuard.js';
 import { logger } from '../../utils/logger.js';
+
+// ===========================================
+// Text helpers for the mock's word-based embeddings and extractive answers
+// ===========================================
+
+const STOPWORDS = new Set(
+  (
+    'the a an and or but if of to in on at by for with from as is are was were be been being it its this that these those ' +
+    'do does did how what when where which who whom why can could should would will shall may might must not no yes ' +
+    'i you he she we they me my your our their there here than then so such about into over under between per'
+  ).split(' ')
+);
+
+/** Lowercase words without accents or stopwords, with a light plural/verb-ending stem */
+export function tokenize(text: string): string[] {
+  const words = text
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .match(/[a-z0-9]+/g);
+  return (words ?? []).filter((word) => word.length > 1 && !STOPWORDS.has(word)).map(stem);
+}
+
+/** Crude suffix stripping so "cause", "caused", "causes" and "remote", "remotely" collapse to one token */
+function stem(input: string): string {
+  let word = input;
+  if (word.length > 5 && word.endsWith('ly')) word = word.slice(0, -2);
+  if (word.length > 5 && word.endsWith('ing')) word = word.slice(0, -3);
+  else if (word.length > 4 && word.endsWith('ed')) word = word.slice(0, -2);
+  else if (word.length > 4 && word.endsWith('es')) word = word.slice(0, -2);
+  else if (word.length > 3 && word.endsWith('s') && !word.endsWith('ss')) word = word.slice(0, -1);
+  if (word.length > 3 && word.endsWith('e')) word = word.slice(0, -1);
+  return word;
+}
+
+/** 32-bit FNV-1a hash: stable across runs and platforms */
+function fnv1a(text: string): number {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash >>> 0;
+}
 
 // ===========================================
 // Mock Provider Implementation
@@ -186,31 +231,36 @@ export class MockProvider implements LlmProvider {
   // ===========================================
 
   /**
-   * Generate a deterministic embedding from text
-   * Uses simple hash to create reproducible vectors
+   * Deterministic "embedding" built from the words of the text (hashed bag of words).
+   * Two texts that share words get a high cosine similarity, so retrieval finds passages that
+   * use the same terms as the question. It is lexical, not semantic: synonyms and paraphrases
+   * do not match, which is the gap a real embedding model closes.
    */
   private generateMockEmbedding(text: string): number[] {
     const embedding = new Array(this.embeddingDimensions).fill(0);
+    const counts = new Map<string, number>();
+    for (const token of tokenize(text)) counts.set(token, (counts.get(token) ?? 0) + 1);
 
-    // Create a simple hash-based embedding
-    // Similar texts will have somewhat similar embeddings
-    for (let i = 0; i < text.length; i++) {
-      const charCode = text.charCodeAt(i);
-      const index = (charCode * (i + 1)) % this.embeddingDimensions;
-      embedding[index] = (embedding[index] ?? 0) + (charCode / 255 - 0.5);
+    if (counts.size > 0) {
+      for (const [token, count] of counts) {
+        const index = fnv1a(token) % this.embeddingDimensions;
+        embedding[index] = (embedding[index] ?? 0) + 1 + Math.log(count);
+      }
+    } else {
+      // No usable words (numbers only, symbols): fall back to a character-based vector
+      for (let i = 0; i < text.length; i++) {
+        const charCode = text.charCodeAt(i);
+        const index = (charCode * (i + 1)) % this.embeddingDimensions;
+        embedding[index] = (embedding[index] ?? 0) + (charCode / 255 - 0.5);
+      }
     }
 
-    // Normalize the vector
-    const magnitude = Math.sqrt(
-      embedding.reduce((sum, val) => sum + val * val, 0)
-    );
-
+    const magnitude = Math.sqrt(embedding.reduce((sum, val) => sum + val * val, 0));
     if (magnitude > 0) {
       for (let i = 0; i < embedding.length; i++) {
         embedding[i] = (embedding[i] ?? 0) / magnitude;
       }
     }
-
     return embedding;
   }
 
@@ -252,37 +302,54 @@ Note: This is a mock response for testing purposes. In production, this would be
   }
 
   /**
-   * Generate mock RAG response with citations
+   * Mock RAG answer: extractive, no language model. It quotes the sentences of the retrieved
+   * passages that share the most words with the question, and cites their chunks. Sentences
+   * that look like instructions (the injection detector flags them) are never quoted, and
+   * nothing in the context is ever obeyed.
    */
   private generateMockRagResponse(prompt: string): string {
-    const question = this.readBlock(prompt, 'QUESTION') ?? 'the query';
+    const question = this.readBlock(prompt, 'QUESTION') ?? '';
     const context = this.readBlock(prompt, 'CONTEXT') ?? '';
+    const questionTokens = new Set(tokenize(question));
 
-    // Cite the first two chunk labels that really appear in the context
-    const cited: number[] = [];
-    for (const match of context.matchAll(/\[chunk-(\d+)\]/g)) {
-      const index = Number(match[1]);
-      if (!cited.includes(index)) cited.push(index);
-      if (cited.length === 2) break;
+    interface Candidate {
+      chunk: number;
+      sentence: string;
+      score: number;
+    }
+    const candidates: Candidate[] = [];
+    for (const match of context.matchAll(/\[chunk-(\d+)\][^\n]*\n([\s\S]*?)(?=\n\n---\n\n|$)/g)) {
+      const chunk = Number(match[1]);
+      for (const raw of (match[2] as string).split(/(?<=[.!?])\s+|\n+/)) {
+        const sentence = raw.trim();
+        if (sentence.length < 12 || detectInjection(sentence).flagged) continue;
+        const score = new Set(tokenize(sentence).filter((token) => questionTokens.has(token))).size;
+        if (score > 0) candidates.push({ chunk, sentence, score });
+      }
     }
 
-    // Always the same JSON shape, whatever the document says: the mock never obeys text in the context
-    if (cited.length === 0) {
+    // Always the same JSON shape, whatever the document says
+    if (candidates.length === 0) {
       return JSON.stringify({
         answer: "I couldn't find information about this in your documents.",
         citations: [],
         confidence: 'LOW',
-        reasoning: 'No relevant context was provided.',
+        reasoning: 'No passage shares meaningful words with the question.',
       });
     }
 
+    candidates.sort((a, b) => b.score - a.score || a.chunk - b.chunk);
+    // A second sentence only when it is nearly as relevant as the first: one shared word is noise
+    const top = candidates[0] as Candidate;
+    const best = candidates.filter((c, index) => index === 0 || (index === 1 && c.score >= 2 && c.score * 2 >= top.score));
+    const citations = [...new Set(best.map((c) => c.chunk))];
     return JSON.stringify({
-      answer: `Based on your documents, here is a (mock) answer to "${question.slice(0, 200)}": the content addresses your question. ${cited
-        .map((index) => `[chunk-${index}]`)
-        .join(' ')}`,
-      citations: cited,
-      confidence: 'MEDIUM',
-      reasoning: 'Mock provider: deterministic answer for local development and tests.',
+      answer: `(Demo mode, no AI model: the closest passages from your documents.) ${best
+        .map((c) => c.sentence)
+        .join(' ')} ${citations.map((index) => `[chunk-${index}]`).join(' ')}`,
+      citations,
+      confidence: (best[0] as Candidate).score >= 2 ? 'MEDIUM' : 'LOW',
+      reasoning: 'Mock provider: extractive answer from the sentences that share the most words with the question.',
     });
   }
 

@@ -68,7 +68,11 @@ async function main(): Promise<void> {
   );
 
   for (const file of fs.readdirSync(SAMPLES_DIR).filter((f) => f.endsWith('.txt')).sort()) {
-    const title = file.replace(/\.txt$/, '').replace(/-/g, ' ');
+    const title = file
+      .replace(/\.txt$/, '')
+      .split('-')
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(' ');
     if (titles.has(title)) {
       console.log(`  skip   ${title} (already uploaded)`);
       continue;

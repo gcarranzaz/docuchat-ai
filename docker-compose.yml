@@ -125,6 +125,8 @@ services:
       EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-auto}
       AI_FALLBACK_PROVIDER: ${AI_FALLBACK_PROVIDER:-none}
       TOOLS_ENABLED: ${TOOLS_ENABLED:-false}
+      # Mock provider only: pause between streamed words so the token-by-token effect is visible
+      MOCK_STREAM_DELAY_MS: ${MOCK_STREAM_DELAY_MS:-30}
       OPENAI_MODEL: gpt-4-turbo-preview
       OPENAI_EMBEDDING_MODEL: text-embedding-3-small
 

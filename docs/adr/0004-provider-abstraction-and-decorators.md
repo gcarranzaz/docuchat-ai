@@ -13,7 +13,7 @@ The requirements ask that the model provider can be changed. Providers differ in
 
 ## Consequences
 - Switching provider is configuration (`AI_PROVIDER`, `AI_FALLBACK_PROVIDER`); the pipeline, prompts and post-processing do not change.
-- The Mock makes the whole stack, the integration tests and the CI eval run with no keys and no cost. Its embeddings are not semantic, so demo answers have low confidence (the UI says so); it proves plumbing, not quality.
+- The Mock makes the whole stack, the integration tests and the CI eval run with no keys and no cost. It is not a model: its embeddings are hashed bags of words (retrieval by shared terms, no synonyms) and its answers are extracted sentences marked "Demo mode". That is enough to exercise retrieval, citations, streaming and the interface, and it proves plumbing, not quality.
 - Only completions fall back. Embeddings do not, for the dimension reason above. After the first streamed token there is no retry or fallback, because the user has already seen output.
 - Writing the Anthropic client by hand costs maintenance (streaming parser) but keeps the dependency list short and the behaviour visible; it was verified against the live API (`npm run smoke:anthropic`). The OpenAI path was not exercised live for this exercise.
 
