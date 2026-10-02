@@ -12,7 +12,7 @@
  * Security:
  * - All endpoints validate input with Zod
  * - Passwords never logged or returned
- * - Rate limiting on auth endpoints (TODO: Paso 4)
+ * - Rate limiting on auth endpoints (see authLimiter below)
  */
 
 import { Router, Request, Response, NextFunction } from 'express';
