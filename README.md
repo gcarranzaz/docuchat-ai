@@ -141,14 +141,14 @@ Terraform for AWS (ECS Fargate, RDS with pgvector, ElastiCache, ALB, Secrets Man
 ## Trade-offs and known limitations
 
 - **The zero-key demo is not a language model.** Its retrieval is lexical (shared words, no synonyms) and its answers are extracted sentences, so it shows the plumbing and the interface, not answer quality.
-- **The OpenAI path was not run against the live API.** The Anthropic path was (a smoke test and the evaluation set, both against a real model); its tool-calling path was tested only against a simulated HTTP layer.
+- **Tool-calling was tested only against a simulated HTTP layer**, not a live model. Both chat providers (OpenAI, Anthropic) have been run against the real API end-to-end (upload, embeddings, RAG answer with citations).
 - **Evaluation is small.** 14 cases catch gross regressions, not subtle ones, and the confidence score is not calibrated. A larger set built from real feedback is the next step.
 - **Injection defense is layered but not complete.** A model can still follow a clever instruction and write a misleading, well-formed answer; confidence and citations are the mitigation.
 - **PII masking is pattern-based**: it misses names and addresses.
 - **The upload summary call is not counted against the per-user budget.** It is bounded by input truncation and the upload rate limit; routing it through the budget service is a known next step.
 - **Streaming shows a draft before validation**, so a user can briefly see text that is later corrected or rejected.
 - **Fixed-size chunking and vector-only retrieval.** No re-ranking, no hybrid keyword search, no semantic chunking.
-- **CI has not run on GitHub** (the workflow was checked locally, piece by piece). **Terraform has not been applied.**
+- **Terraform has not been applied** to a real AWS account (`init`/`validate`/`fmt` pass; no `plan`/`apply` run).
 - Tokens live in browser storage; registration reveals whether an email exists (409). Both are documented trade-offs for a prototype.
 
 **What I would do next:** a larger evaluation set from thumbs-down feedback with a CI gate on the live baseline; budget accounting for the summary call; httpOnly cookies; hybrid search and re-ranking; the first real `terraform plan` and a staging deploy; JWT rotation with key ids so rotating does not sign everyone out.
