@@ -25,7 +25,9 @@ export interface ModelPrice {
 /** Snapshot of public list prices at the time of writing; override with MODEL_PRICING_JSON */
 export const DEFAULT_PRICES: Record<string, ModelPrice> = {
   // OpenAI
-  'gpt-4-turbo-preview': { input: 10.0, output: 30.0 },
+  'gpt-4o': { input: 2.5, output: 10.0 },
+  'gpt-4o-mini': { input: 0.15, output: 0.6 },
+  'gpt-4-turbo-preview': { input: 10.0, output: 30.0 }, // retired by OpenAI; kept for cost-history reference
   'gpt-4': { input: 30.0, output: 60.0 },
   'gpt-3.5-turbo': { input: 0.5, output: 1.5 },
   'text-embedding-3-small': { input: 0.02, output: 0 },

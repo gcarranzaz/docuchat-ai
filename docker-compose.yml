@@ -127,7 +127,7 @@ services:
       TOOLS_ENABLED: ${TOOLS_ENABLED:-false}
       # Mock provider only: pause between streamed words so the token-by-token effect is visible
       MOCK_STREAM_DELAY_MS: ${MOCK_STREAM_DELAY_MS:-30}
-      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4-turbo-preview}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
       OPENAI_EMBEDDING_MODEL: text-embedding-3-small
 
       # Vector search. 0.0 because mock embeddings are not semantic; use 0.6 with a real embedding model.

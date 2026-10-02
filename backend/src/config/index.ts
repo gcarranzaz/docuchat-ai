@@ -63,7 +63,7 @@ const configSchema = z.object({
   // AI Provider
   aiProvider: z.enum(['mock', 'openai', 'anthropic']).default('mock'),
   openaiApiKey: z.string().optional(),
-  openaiModel: z.string().default('gpt-4-turbo-preview'),
+  openaiModel: z.string().default('gpt-4o-mini'),
   openaiEmbeddingModel: z.string().default('text-embedding-3-small'),
   anthropicApiKey: z.string().optional(),
   anthropicModel: z.string().default('claude-sonnet-5-5'),

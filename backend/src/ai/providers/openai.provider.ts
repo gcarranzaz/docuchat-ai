@@ -5,7 +5,7 @@
  *
  * Models used:
  * - Embeddings: text-embedding-3-small (1536 dimensions, cheap, good quality)
- * - Completions: gpt-4-turbo-preview (best for RAG/extraction)
+ * - Completions: gpt-4o-mini by default (configurable via OPENAI_MODEL)
  *
  * Error handling:
  * - Retries on rate limits (exponential backoff)
