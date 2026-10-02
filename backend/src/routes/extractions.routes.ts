@@ -15,13 +15,9 @@ const router = Router();
  * Response: 204 No Content
  */
 router.delete('/', authMiddleware, generalLimiter, async (req: Request, res: Response) => {
-  try {
-    const userId = req.userId!;
-    await extractionService.deleteAllExtractions(userId);
-    res.status(204).send();
-  } catch (error) {
-    throw error;
-  }
+  const userId = req.userId!;
+  await extractionService.deleteAllExtractions(userId);
+  res.status(204).send();
 });
 /**
  * Extraction Routes
@@ -51,32 +47,28 @@ const paginationSchema = z.object({
 // ===========================================
 
 router.post('/', authMiddleware, extractLimiter, async (req: Request, res: Response) => {
-  try {
-    const userId = req.userId!;
+  const userId = req.userId!;
 
-    // Validate input
-    const validation = extractionRequestSchema.safeParse(req.body);
-    if (!validation.success) {
-      throw validation.error;
-    }
-
-    const { documentId, schemaName } = validation.data;
-
-    logger.info(
-      { userId, documentId, schemaName },
-      'Extraction request received'
-    );
-
-    // Process extraction
-    const result = await extractionService.extractFromDocument(userId, {
-      documentId,
-      schemaName,
-    });
-
-    res.json(result);
-  } catch (error) {
-    throw error;
+  // Validate input
+  const validation = extractionRequestSchema.safeParse(req.body);
+  if (!validation.success) {
+    throw validation.error;
   }
+
+  const { documentId, schemaName } = validation.data;
+
+  logger.info(
+    { userId, documentId, schemaName },
+    'Extraction request received'
+  );
+
+  // Process extraction
+  const result = await extractionService.extractFromDocument(userId, {
+    documentId,
+    schemaName,
+  });
+
+  res.json(result);
 });
 
 /**
@@ -98,12 +90,8 @@ router.post('/', authMiddleware, extractLimiter, async (req: Request, res: Respo
  * ]
  */
 router.get('/schemas', authMiddleware, generalLimiter, async (_req: Request, res: Response) => {
-  try {
-    const schemas = extractionService.getAvailableSchemas();
-    res.json(schemas);
-  } catch (error) {
-    throw error;
-  }
+  const schemas = extractionService.getAvailableSchemas();
+  res.json(schemas);
 });
 
 /**
@@ -130,27 +118,23 @@ router.get('/schemas', authMiddleware, generalLimiter, async (_req: Request, res
  * }
  */
 router.get('/', authMiddleware, generalLimiter, async (req: Request, res: Response) => {
-  try {
-    const userId = req.userId!;
+  const userId = req.userId!;
 
-    // Validate query params
-    const validation = paginationSchema.safeParse(req.query);
-    if (!validation.success) {
-      throw validation.error;
-    }
-
-    const { limit, offset } = validation.data;
-
-    const result = await extractionService.listExtractions(
-      userId,
-      limit,
-      offset
-    );
-
-    res.json(result);
-  } catch (error) {
-    throw error;
+  // Validate query params
+  const validation = paginationSchema.safeParse(req.query);
+  if (!validation.success) {
+    throw validation.error;
   }
+
+  const { limit, offset } = validation.data;
+
+  const result = await extractionService.listExtractions(
+    userId,
+    limit,
+    offset
+  );
+
+  res.json(result);
 });
 
 /**
@@ -170,20 +154,16 @@ router.get('/', authMiddleware, generalLimiter, async (req: Request, res: Respon
  * }
  */
 router.get('/:id', authMiddleware, generalLimiter, async (req: Request, res: Response) => {
-  try {
-    const userId = req.userId!;
-    const extractionId = req.params.id;
+  const userId = req.userId!;
+  const extractionId = req.params.id;
 
-    if (!extractionId) {
-      throw errors.badRequest('Extraction ID is required');
-    }
-
-    const result = await extractionService.getExtraction(userId, extractionId);
-
-    res.json(result);
-  } catch (error) {
-    throw error;
+  if (!extractionId) {
+    throw errors.badRequest('Extraction ID is required');
   }
+
+  const result = await extractionService.getExtraction(userId, extractionId);
+
+  res.json(result);
 });
 
 /**
@@ -207,23 +187,19 @@ router.get(
   authMiddleware,
   generalLimiter,
   async (req: Request, res: Response) => {
-    try {
-      const userId = req.userId!;
-      const documentId = req.params.documentId;
+    const userId = req.userId!;
+    const documentId = req.params.documentId;
 
-      if (!documentId) {
-        throw errors.badRequest('Document ID is required');
-      }
-
-      const result = await extractionService.listExtractionsByDocument(
-        userId,
-        documentId
-      );
-
-      res.json(result);
-    } catch (error) {
-      throw error;
+    if (!documentId) {
+      throw errors.badRequest('Document ID is required');
     }
+
+    const result = await extractionService.listExtractionsByDocument(
+      userId,
+      documentId
+    );
+
+    res.json(result);
   }
 );
 
@@ -235,20 +211,16 @@ router.get(
  * 204 No Content
  */
 router.delete('/:id', authMiddleware, generalLimiter, async (req: Request, res: Response) => {
-  try {
-    const userId = req.userId!;
-    const extractionId = req.params.id;
+  const userId = req.userId!;
+  const extractionId = req.params.id;
 
-    if (!extractionId) {
-      throw errors.badRequest('Extraction ID is required');
-    }
-
-    await extractionService.deleteExtraction(userId, extractionId);
-
-    res.status(204).send();
-  } catch (error) {
-    throw error;
+  if (!extractionId) {
+    throw errors.badRequest('Extraction ID is required');
   }
+
+  await extractionService.deleteExtraction(userId, extractionId);
+
+  res.status(204).send();
 });
 
 export default router;

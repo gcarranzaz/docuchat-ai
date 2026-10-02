@@ -86,31 +86,27 @@ const paginationSchema = z.object({
  * }
  */
 router.post('/', authMiddleware, chatLimiter, async (req: Request, res: Response) => {
-  try {
-    const userId = req.userId!;
+  const userId = req.userId!;
 
-    // Validate input
-    const validation = chatRequestSchema.safeParse(req.body);
-    if (!validation.success) {
-      throw validation.error;
-    }
-
-    const { question, sessionId, documentIds, regenerate } = validation.data;
-
-    logger.info({ userId, sessionId, hasDocumentFilter: !!documentIds }, 'Chat request received');
-
-    // Process chat
-    const result = await chatService.chat(userId, {
-      question,
-      sessionId,
-      documentIds,
-      regenerate,
-    });
-
-    res.json(result);
-  } catch (error) {
-    throw error;
+  // Validate input
+  const validation = chatRequestSchema.safeParse(req.body);
+  if (!validation.success) {
+    throw validation.error;
   }
+
+  const { question, sessionId, documentIds, regenerate } = validation.data;
+
+  logger.info({ userId, sessionId, hasDocumentFilter: !!documentIds }, 'Chat request received');
+
+  // Process chat
+  const result = await chatService.chat(userId, {
+    question,
+    sessionId,
+    documentIds,
+    regenerate,
+  });
+
+  res.json(result);
 });
 
 /**
@@ -254,23 +250,19 @@ router.delete('/messages/:id/feedback', authMiddleware, generalLimiter, async (r
  * }
  */
 router.get('/sessions', authMiddleware, generalLimiter, async (req: Request, res: Response) => {
-  try {
-    const userId = req.userId!;
+  const userId = req.userId!;
 
-    // Validate query params
-    const validation = paginationSchema.safeParse(req.query);
-    if (!validation.success) {
-      throw validation.error;
-    }
-
-    const { limit, offset } = validation.data;
-
-    const result = await chatService.listSessions(userId, limit, offset);
-
-    res.json(result);
-  } catch (error) {
-    throw error;
+  // Validate query params
+  const validation = paginationSchema.safeParse(req.query);
+  if (!validation.success) {
+    throw validation.error;
   }
+
+  const { limit, offset } = validation.data;
+
+  const result = await chatService.listSessions(userId, limit, offset);
+
+  res.json(result);
 });
 
 /**
@@ -304,20 +296,16 @@ router.get('/sessions', authMiddleware, generalLimiter, async (req: Request, res
  * }
  */
 router.get('/sessions/:id', authMiddleware, generalLimiter, async (req: Request, res: Response) => {
-  try {
-    const userId = req.userId!;
-    const sessionId = req.params.id;
+  const userId = req.userId!;
+  const sessionId = req.params.id;
 
-    if (!sessionId) {
-      throw errors.badRequest('Session ID is required');
-    }
-
-    const result = await chatService.getSession(userId, sessionId);
-
-    res.json(result);
-  } catch (error) {
-    throw error;
+  if (!sessionId) {
+    throw errors.badRequest('Session ID is required');
   }
+
+  const result = await chatService.getSession(userId, sessionId);
+
+  res.json(result);
 });
 
 /**
@@ -338,28 +326,24 @@ router.get('/sessions/:id', authMiddleware, generalLimiter, async (req: Request,
  * }
  */
 router.patch('/sessions/:id', authMiddleware, generalLimiter, async (req: Request, res: Response) => {
-  try {
-    const userId = req.userId!;
-    const sessionId = req.params.id;
+  const userId = req.userId!;
+  const sessionId = req.params.id;
 
-    if (!sessionId) {
-      throw errors.badRequest('Session ID is required');
-    }
-
-    // Validate input
-    const validation = updateSessionSchema.safeParse(req.body);
-    if (!validation.success) {
-      throw validation.error;
-    }
-
-    const { title } = validation.data;
-
-    const result = await chatService.updateSession(userId, sessionId, title);
-
-    res.json(result);
-  } catch (error) {
-    throw error;
+  if (!sessionId) {
+    throw errors.badRequest('Session ID is required');
   }
+
+  // Validate input
+  const validation = updateSessionSchema.safeParse(req.body);
+  if (!validation.success) {
+    throw validation.error;
+  }
+
+  const { title } = validation.data;
+
+  const result = await chatService.updateSession(userId, sessionId, title);
+
+  res.json(result);
 });
 
 /**
@@ -370,20 +354,16 @@ router.patch('/sessions/:id', authMiddleware, generalLimiter, async (req: Reques
  * 204 No Content
  */
 router.delete('/sessions/:id', authMiddleware, generalLimiter, async (req: Request, res: Response) => {
-  try {
-    const userId = req.userId!;
-    const sessionId = req.params.id;
+  const userId = req.userId!;
+  const sessionId = req.params.id;
 
-    if (!sessionId) {
-      throw errors.badRequest('Session ID is required');
-    }
-
-    await chatService.deleteSession(userId, sessionId);
-
-    res.status(204).send();
-  } catch (error) {
-    throw error;
+  if (!sessionId) {
+    throw errors.badRequest('Session ID is required');
   }
+
+  await chatService.deleteSession(userId, sessionId);
+
+  res.status(204).send();
 });
 
 /**
@@ -392,13 +372,9 @@ router.delete('/sessions/:id', authMiddleware, generalLimiter, async (req: Reque
  * Response: 204 No Content
  */
 router.delete('/sessions', authMiddleware, generalLimiter, async (req: Request, res: Response) => {
-  try {
-    const userId = req.userId!;
-    await chatService.deleteAllSessions(userId);
-    res.status(204).send();
-  } catch (error) {
-    throw error;
-  }
+  const userId = req.userId!;
+  await chatService.deleteAllSessions(userId);
+  res.status(204).send();
 });
 
 export default router;

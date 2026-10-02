@@ -19,7 +19,7 @@ import * as chunkRepo from '../repositories/chunk.repository.js';
 import { embedQuery } from './embeddings.js';
 import { getConfig } from '../config/index.js';
 import { logger } from '../utils/logger.js';
-import type { ChunkWithScore, DocChunk } from '../types/index.js';
+import type { ChunkWithScore } from '../types/index.js';
 
 // ===========================================
 // Types

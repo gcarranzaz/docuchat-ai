@@ -31,6 +31,7 @@ export interface PreparedQuestion {
 }
 
 // Zero-width characters, bidi overrides/isolates and the BOM: used to hide or reorder text
+// eslint-disable-next-line no-irregular-whitespace -- the chars being matched are the point
 const INVISIBLE = /[​-‏‪-‮⁠-⁤⁦-⁩﻿]/g;
 // C0/C1 control characters except tab (\u0009) and newline (\u000A)
 // eslint-disable-next-line no-control-regex

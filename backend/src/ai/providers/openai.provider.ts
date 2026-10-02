@@ -115,7 +115,7 @@ export class OpenAIProvider implements LlmProvider {
         input: texts,
       });
 
-      const results: EmbeddingResult[] = response.data.map((item, index) => ({
+      const results: EmbeddingResult[] = response.data.map((item) => ({
         embedding: item.embedding,
         // Estimate token count per text (total divided by count)
         tokenCount: Math.ceil((response.usage?.total_tokens ?? 0) / texts.length),

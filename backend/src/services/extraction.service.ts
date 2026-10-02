@@ -34,7 +34,6 @@ import { logger } from '../utils/logger.js';
 import * as audit from './audit.service.js';
 import { getConfig } from '../config/index.js';
 import type { Extraction, ValidationError } from '../types/index.js';
-import { ZodError } from 'zod';
 
 // ===========================================
 // Types

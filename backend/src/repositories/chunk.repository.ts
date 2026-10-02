@@ -11,7 +11,7 @@
  * IMPORTANT: All queries filter by userId for tenant isolation.
  */
 
-import { query, withTransaction, getClient } from '../config/database.js';
+import { query, withTransaction } from '../config/database.js';
 import type { DocChunk, ChunkWithScore } from '../types/index.js';
 import { getConfig } from '../config/index.js';
 

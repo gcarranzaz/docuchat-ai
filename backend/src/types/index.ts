@@ -231,6 +231,7 @@ export interface RetrievalResult {
 // ===========================================
 
 declare global {
+  // eslint-disable-next-line @typescript-eslint/no-namespace -- ambient module augmentation requires `namespace Express`
   namespace Express {
     interface Request {
       userId?: string;

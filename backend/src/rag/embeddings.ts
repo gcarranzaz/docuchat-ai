@@ -18,9 +18,8 @@ import { getEmbeddingProvider } from '../ai/providers/providerFactory.js';
 import * as chunkRepo from '../repositories/chunk.repository.js';
 import * as documentRepo from '../repositories/document.repository.js';
 import * as usageRepo from '../repositories/usage.repository.js';
-import { chunkText, type Chunk } from './chunker.js';
+import { chunkText } from './chunker.js';
 import { logger } from '../utils/logger.js';
-import type { DocChunk } from '../types/index.js';
 
 // ===========================================
 // Types

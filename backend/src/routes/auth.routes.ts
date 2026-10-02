@@ -29,7 +29,6 @@ import {
   type DeleteAccountInput,
 } from '../schemas/auth.schema.js';
 import * as authService from '../services/auth.service.js';
-import { logger } from '../utils/logger.js';
 
 const router = Router();
 

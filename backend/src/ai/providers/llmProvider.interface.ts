@@ -15,7 +15,7 @@
  * - (Future) AnthropicProvider: Alternative provider
  */
 
-import type { EmbeddingResult, CompletionResult, LlmProviderConfig } from '../../types/index.js';
+import type { EmbeddingResult, CompletionResult } from '../../types/index.js';
 
 // ===========================================
 // Provider Interface

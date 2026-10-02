@@ -28,7 +28,6 @@ import {
 } from '../schemas/document.schema.js';
 import * as documentService from '../services/document.service.js';
 import { errors } from '../middleware/error.middleware.js';
-import { logger } from '../utils/logger.js';
 
 const router = Router();
 
