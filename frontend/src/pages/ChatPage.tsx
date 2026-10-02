@@ -74,6 +74,29 @@ export default function ChatPage() {
     void loadDocuments();
   }, [loadDocuments]);
 
+  // Chunking/embedding runs in the background worker, so a freshly uploaded
+  // document starts at 0 chunks. Poll quietly (no spinner) until it catches up.
+  useEffect(() => {
+    if (!documents.some((doc) => doc.chunkCount === 0)) return;
+
+    let attempts = 0;
+    const interval = setInterval(() => {
+      attempts += 1;
+      if (attempts > 10) {
+        clearInterval(interval);
+        return;
+      }
+      void documentApi.list().then((response) => {
+        if (response.data) {
+          const data = response.data as { documents: Document[]; total: number };
+          setDocuments(data.documents || []);
+        }
+      });
+    }, 1500);
+
+    return () => clearInterval(interval);
+  }, [documents]);
+
   // Follow the answer as it is written
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView?.({ behavior: 'smooth' });

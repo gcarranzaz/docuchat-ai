@@ -81,6 +81,17 @@ describe('ChatPage: loading, empty and error states', () => {
     render(<ChatPage />);
     expect(await screen.findByText(/answers cite their sources/i)).toBeInTheDocument();
   });
+
+  it('picks up the chunk count once background embedding finishes, without a manual reload', async () => {
+    vi.mocked(documentApi.list)
+      .mockReset()
+      .mockResolvedValueOnce({ data: { documents: [{ ...DOC, chunkCount: 0 }], total: 1 } })
+      .mockResolvedValue({ data: { documents: [{ ...DOC, chunkCount: 5 }], total: 1 } });
+
+    render(<ChatPage />);
+    expect(await screen.findByText('0 chunks')).toBeInTheDocument();
+    expect(await screen.findByText('5 chunks', {}, { timeout: 4000 })).toBeInTheDocument();
+  });
 });
 
 describe('ChatPage: asking a question', () => {
